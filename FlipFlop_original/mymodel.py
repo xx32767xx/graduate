@@ -13,33 +13,16 @@ import json
 from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
-#############################################################################
-# 1) GPU ARCHITECTURE
-#############################################################################
-
-
-#############################################################################
-# 2) PTX ANALYSIS
-#############################################################################
-
-
-#############################################################################
-# 3) ExecutionTimeEstimator (Hong & Kim Equations)
-#############################################################################
-
-
-#############################################################################
-# 4) UTILITY: Compile & Benchmark
-#############################################################################
 
 def compile_kernel(kernel_path: str, arch: GPUArchitecture, arch_options:str):
     with open(kernel_path, 'r') as f:
         source = f.read()
     cc = arch.compute_capability
     arch_opt = arch_options + [ 
-        f"-arch=sm_{cc[0]}{cc[1]}"
+        f"-arch=sm_{cc[0]}{cc[1]}",
+        "--ptxas-options=-v"
     ]
-    ptx_bytes = compile(source, target="ptx", options=[arch_opt, "--ptxas-options=-v"], no_extern_c=True)
+    ptx_bytes = compile(source, target="ptx", options=arch_opt, no_extern_c=True)
     ptx_str = ptx_bytes.decode()
     m = re.search(r"\.entry\s+(\w+)", ptx_str)
     if not m:
@@ -47,7 +30,7 @@ def compile_kernel(kernel_path: str, arch: GPUArchitecture, arch_options:str):
     with open(kernel_path+".ptx",'w') as ff:
         ff.write(ptx_str)
     
-    mod = SourceModule(source, options=[arch_opt, "--ptxas-options=-v"], no_extern_c=True)
+    mod = SourceModule(source, options=arch_opt, no_extern_c=True)
     kernel_name = m.group(1)
     compile_log = getattr(mod, "_compile_log", "")
     
@@ -104,7 +87,7 @@ if __name__=="__main__":
     print(f"DEBUG: Using arch_options: {arch_options}")
 
     # 2) Compile
-    mod, ptx, ptx_log, kernel_name = compile_kernel(kernel_path, arch_options)
+    mod, ptx, ptx_log, kernel_name = compile_kernel(kernel_path, arch,arch_options)
     kernel_func= mod.get_function(kernel_name)
 
     # 3) Prepare data
