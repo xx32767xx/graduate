@@ -114,7 +114,7 @@ class Calibrator:
 
 
         # Concurrency model
-        alpha_fitted, beta_fitted, sms_vals, power_deltas = self._fit_log_scaling_parameters(idle_pw)
+        alpha_fitted, beta_fitted, sms_vals, power_deltas = (0,0,0,0)
         # short_kernel_scale = self._measure_short_kernel_ramp()
         
         # if sms_vals.size > 0 and power_deltas.size > 0:
@@ -150,8 +150,6 @@ class Calibrator:
                 "short_kernel_scale": short_kernel_scale,
                 "max_power_total": 200.0,
                 "shape_occupancy_factor": occupancy_shape_param,
-                "sm_values": sms_vals.tolist(),
-                "power_deltas": power_deltas.tolist(),
             }
         }
 

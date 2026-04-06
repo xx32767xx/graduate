@@ -24,6 +24,7 @@ class PTXAnalyzer:
         self.block_x = block_x
         self.block_y = block_y
         self.config = config or {}
+        self.params = []
 
         # Defaults
         self.regs_per_thread = 32
@@ -43,7 +44,7 @@ class PTXAnalyzer:
 
     def analyze(self):
         self._parse_ptxas_info()
-        lines = self.ptx_code.split('\n')
+        (lines,self.params) = self._preprocess_ptx(self.ptx_code.split('\n'))
         self._collect_labels(lines)
         self._build_basic_blocks(lines)
         self._build_cfg()
@@ -222,7 +223,7 @@ class PTXAnalyzer:
     ### Instruction Counting in Basic Blocks
     def _accumulate_block_insts(self, loop_iters: Dict[int, int]) -> Tuple[int, ...]:
         num_blocks = len(self.basic_blocks)
-        counts = {k: [0] * num_blocks for k in 
+        counts = {k: [0] * num_blocks for k in
                   ['ld', 'st', 'loc', 'shr', 'sync', 'fp', 'int', 'sfu', 'alu']}
 
         for b_idx in range(num_blocks):
@@ -253,11 +254,12 @@ class PTXAnalyzer:
 
     def _count_block_insts(self, b_idx: int) -> Tuple[int, ...]:
         block_lines = self.basic_blocks[b_idx]
+        print(block_lines)
         ldg = stg = loc = shr = sy = fpc = inc = sfc = alc = 0
 
         patterns = {
-            'fp': re.compile(r"\b(fadd|fsub|fmul|fma|fdiv|frcp|fsqrt|frsqrt|fsin|fcos)\b", re.IGNORECASE),
-            'int': re.compile(r"\b(add|sub|mul|div|rem|min|max|popc|clz)\b", re.IGNORECASE),
+            'fp': re.compile(r"\b(add|sub|mul|div|rcp|ma)\.f(32|64|8|16)\b", re.IGNORECASE),
+            'int': re.compile(r"\b(add|sub|mul|div|rem|min|max|popc|clz|mov|mad|setp)\b", re.IGNORECASE),
             'sfu': re.compile(r"\b(sin|cos|ex2|lg2|rcp|rsqrt|sqrt)\b", re.IGNORECASE),
             'mem': re.compile(r"\b(ld|st)\.(global|local|shared)\b", re.IGNORECASE),
             'sync': re.compile(r"\bbar\.sync\b", re.IGNORECASE)
@@ -283,7 +285,7 @@ class PTXAnalyzer:
                 sfc += 1
             else:
                 alc += 1  # Default to ALU for unclassified instructions
-
+        print(f"(ldg, stg, loc, shr, sy, fpc, inc, sfc, alc):{(ldg, stg, loc, shr, sy, fpc, inc, sfc, alc)}")
         return (ldg, stg, loc, shr, sy, fpc, inc, sfc, alc)
 
     def _find_block_loop_membership(self, loop_iters: Dict[int, int]) -> Dict[int, Set[int]]:
@@ -359,6 +361,25 @@ class PTXAnalyzer:
 
         return stride1_count / total_mem_ops if total_mem_ops > 0 else 1.0
 
+    def _preprocess_ptx(self, lines: List[str]):
+        cleaned_lines = []
+        params = []
+        for line in lines:
+            # 1. 去除行首尾的空白字符（空格、制表符等）
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith('//') or len(stripped) == 1:
+                continue
+            if stripped.startswith('.'):
+                if stripped.startswith('.param'):
+                    params.append(stripped)
+                else:
+                    continue
+            else:
+                cleaned_lines.append(stripped)
+
+        return cleaned_lines,params
 # Example usage
 # ptx_analyzer = PTXAnalyzer(ptx_code, ptxas_log, arch, block_x, block_y, config)
 # analysis = ptx_analyzer.analyze()

@@ -64,6 +64,7 @@ class HongKimExecutionTimeModel:
         threads_per_block = bx * by
         warps_per_block   = (threads_per_block + warp_size - 1) // warp_size
         total_warps       = total_blocks * warps_per_block
+        print(f"warp线程数: {warp_size}, 总warp数: {total_warps}")
 
         # 访存指令
         mem_coal   = float(self.analysis.mem_coal   * total_warps)
@@ -71,6 +72,7 @@ class HongKimExecutionTimeModel:
         mem_part   = float(self.analysis.mem_partial* total_warps)
         mem_loc    = float(self.analysis.local_insts * total_warps)   #局部内存 显存溢出
         mem_shr    = float(self.analysis.shared_insts* total_warps)   #共享内存 不过显存
+        print(f"访存统计：coal:{mem_coal} uncoal:{mem_uncoal} part:{mem_part} loc:{mem_uncoal} shr:{mem_shr} ")
 
         global_count = mem_coal + mem_uncoal + mem_part     #过显存次数
         mem_total    = global_count + mem_loc + mem_shr     #所有访存次数
@@ -81,9 +83,11 @@ class HongKimExecutionTimeModel:
         comp_sfu = float(self.analysis.sfu_insts * total_warps)
         comp_alu = float(self.analysis.alu_insts * total_warps)
         comp_sum = comp_fp + comp_int + comp_sfu + comp_alu
+        print(f"计算统计：fp:{comp_fp} int:{comp_int} sfu:{comp_sfu} alu:{comp_alu}")
 
         # 同步指令
-        sync_count = float(self.analysis.synch_insts * total_warps)   
+        sync_count = float(self.analysis.synch_insts * total_warps)
+        print(f"同步统计：sync count:{sync_count}")
 
         # 换算访存延迟单位到秒 
         lat_coal   = self.Mem_coal_ns   * 1e-9
@@ -91,6 +95,12 @@ class HongKimExecutionTimeModel:
         lat_part   = self.Mem_partial_ns* 1e-9
         lat_shared = self.Mem_shared_ns * 1e-9
         lat_local  = self.Mem_local_ns  * 1e-9
+
+        if mem_total < 1:
+            #单纯计算
+            comp_cycles = comp_sum * self.issue_cycles
+            time_ns = (comp_cycles / self.arch.clock_rate_hz)*1e9 + self.baseline_ns
+            return time_ns
 
         # 计算显存访存延迟
         if global_count > 1e-9:
@@ -101,30 +111,22 @@ class HongKimExecutionTimeModel:
             ) / global_count
         else:
             global_lat = 0.0
-
-        if mem_total < 1:
-            #单纯计算
-            comp_cycles = comp_sum * self.issue_cycles
-            time_ns = (comp_cycles / self.arch.clock_rate_hz)*1e9 + self.baseline_ns
-            return time_ns
+        coalesce_eff = min(1.0, float(bx)/warp_size) if warp_size>0 else 1.0  # 计算线程合并效率
+        effective_global_lat = global_lat * (1.0 + (1.0 - coalesce_eff)*2.0)  # 更新有效显存访存延迟
 
         # 访存次数归一化处理
         frac_global = global_count / mem_total if mem_total>0 else 0.0
         frac_local  = mem_loc / mem_total      if mem_total>0 else 0.0
         frac_shared = mem_shr / mem_total      if mem_total>0 else 0.0
-
-        coalesce_eff = min(1.0, float(bx)/warp_size) if warp_size>0 else 1.0  # 计算线程合并效率
-        effective_global_lat = global_lat * (1.0 + (1.0 - coalesce_eff)*2.0)  # 更新有效显存访存延迟
-
         # 计算所有访存延迟
         avg_mem_lat = (
             effective_global_lat*frac_global
           + lat_local*frac_local
           + lat_shared*frac_shared
         )
-
         mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
         comp_cycles = comp_sum*self.issue_cycles    #计算周期
+        print(f"双方互不影响时 访存和计算的周期数: {mem_cycles},{comp_cycles}")
 
         # 计算偏离延迟
         if global_count>1e-9:
@@ -147,11 +149,13 @@ class HongKimExecutionTimeModel:
 
         # 维持多少个Warp同时进行访存
         MWP_woBW_full = avg_mem_lat/mem_dep
+        print(f"维持多少个Warp同时进行访存: {MWP_woBW_full}")
 
         # 硬件限制  N:单个SM不考虑其他约束时最多执行的warp数
         blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
-        warps_per_sm  = blocks_per_sm*warps_per_block
-        N = float(warps_per_sm)   
+        warps_per_sm  = blocks_per_sm * warps_per_block
+        N = float(warps_per_sm)
+        print(f"单个SM不考虑其他约束时最多执行的warp数:{N}")
         MWP_woBW = min(MWP_woBW_full, N)
 
         # 带宽限制
@@ -173,6 +177,7 @@ class HongKimExecutionTimeModel:
         Mem_cy   = mem_cycles
         Comp_cy  = comp_cycles
         reps     = self._calc_block_reps(total_blocks, blocks_per_sm)  # 理想波数
+        print(f"reps:{reps}")
 
         # pick formula
         if abs(MWP-N)<1e-3 and abs(CWP-N)<1e-3:
@@ -227,6 +232,7 @@ class HongKimExecutionTimeModel:
         """
         arch_attrs = self.arch.attrs
         max_thr_sm = arch_attrs['MAX_THREADS_PER_MULTIPROCESSOR']
+        print(f"sm最大线程数:{max_thr_sm}")
         if threads_per_block<1:
             return 1
         tlim = max_thr_sm//threads_per_block
