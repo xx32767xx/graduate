@@ -36,21 +36,26 @@ def compile_kernel(kernel_path: str, arch: GPUArchitecture, arch_options:str):
     
     return mod, ptx_str, compile_log, kernel_name
 
-def benchmark_kernel(kernel_func, args, grid:Tuple[int,int], block:Tuple[int,int], runs:int=50)->float:
-    start= cuda.Event(); end= cuda.Event()
-    block_3d= (block[0], block[1],1)
-    grid_3d= (grid[0], grid[1],1)
-    # warmup
+
+def benchmark_kernel(kernel_func, args, grid:Tuple[int,int], block:Tuple[int,int], runs:int=50)->float:    # 转换为 3D 元组以适配 PyCUDA
+    grid_3d = (grid[0], grid[1], 1)
+    block_3d = (block[0], block[1], 1)
+    start = cuda.Event()
+    end = cuda.Event()
+
     for _ in range(10):
         kernel_func(*args, block=block_3d, grid=grid_3d)
-    times=[]
+    cuda.Context.synchronize()
+
+    start.record()
     for _ in range(runs):
-        start.record()
         kernel_func(*args, block=block_3d, grid=grid_3d)
-        end.record()
-        end.synchronize()
-        times.append(start.time_till(end)*1e6)  # microseconds
-    return float(np.median(times))
+    end.record()
+    end.synchronize()
+
+    total_ms = start.time_till(end)
+    avg_ns = (total_ms * 1e6) / runs
+    return float(avg_ns)
 
 #############################################################################
 # 5) MAIN
@@ -84,10 +89,9 @@ if __name__=="__main__":
         f"-I{project_root}/include",
         f"-I{project_root}/src",
     ]
-    print(f"DEBUG: Using arch_options: {arch_options}")
 
     # 2) Compile
-    mod, ptx, ptx_log, kernel_name = compile_kernel(kernel_path, arch,arch_options)
+    mod, ptx, ptx_log, kernel_name = compile_kernel(kernel_path, arch, arch_options)
     kernel_func= mod.get_function(kernel_name)
 
     # 3) Prepare data
@@ -110,8 +114,6 @@ if __name__=="__main__":
 
     # 6) Actual benchmark
     actual_ns= benchmark_kernel(kernel_func, args, (grid_size,1), (block_size,1), runs)
-    # our benchmark_kernel returns microseconds => multiply by 1e3 => ns
-    actual_ns*=1e3
 
     diff= abs(estimated_ns- actual_ns)/ max(actual_ns,1e-9)*100.0
     print(f"Kernel: {kernel_name}")

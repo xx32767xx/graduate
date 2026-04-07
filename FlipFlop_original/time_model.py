@@ -177,11 +177,8 @@ class HongKimExecutionTimeModel:
         Mem_cy   = mem_cycles
         Comp_cy  = comp_cycles
         reps     = self._calc_block_reps(total_blocks, blocks_per_sm)  # 理想波数
-        print(f"reps:{reps}")
 
-        # pick formula
         if abs(MWP-N)<1e-3 and abs(CWP-N)<1e-3:
-            # case: MWP==N && CWP==N
             totalCycles = (Mem_cy + Comp_cy + comp_p*(MWP-1))*reps
         elif CWP>=MWP or (Comp_cy>Mem_cy):
             totalCycles = (Mem_cy*(N/MWP) + comp_p*(MWP-1))*reps
@@ -189,7 +186,6 @@ class HongKimExecutionTimeModel:
             Mem_L_cycles = avg_mem_lat*self.arch.clock_rate_hz
             totalCycles  = (Mem_L_cycles + Comp_cy*N)*reps   # 完全串行
 
-        # sync overhead
         if mem_dep>1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
             depCycles   = mem_dep*self.arch.clock_rate_hz
             blocks_psm  = blocks_per_sm
@@ -197,7 +193,6 @@ class HongKimExecutionTimeModel:
             syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
             totalCycles+= syncCycles
 
-        # shape factor corrections
         block_dim_x, block_dim_y = bx, by
         ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
         aspect_ratio = float(block_dim_x)/(block_dim_y if block_dim_y>0 else 1.0)  
@@ -218,10 +213,8 @@ class HongKimExecutionTimeModel:
         base_factor = (shape_balance/ce_x) if ce_x>1e-9 else shape_balance
         shape_factor = 1.0 + (base_factor-1.0)/(1.0+compute_intensity)
         shape_factor = max(1.0, min(shape_factor,1.5))
-
         totalCycles*= shape_factor
 
-        # final result in ns
         kernel_ns = (totalCycles/self.arch.clock_rate_hz)*1e9 + self.baseline_ns
         return float(kernel_ns)
 

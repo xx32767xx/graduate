@@ -48,9 +48,9 @@ class PTXAnalyzer:
         self._collect_labels(lines)
         self._build_basic_blocks(lines)
         self._build_cfg()
+
         loops = self._detect_loops()
         loop_iterations = self._estimate_loop_iterations(loops)
-
         self.occupancy_factor = self._estimate_occupancy_factor()
         self.shared_bank_conflict_factor = self._estimate_shared_bank_conflicts()
 
@@ -117,9 +117,6 @@ class PTXAnalyzer:
         control_flow_pat = re.compile(r"\b(?:bra(?:\.uni)?|ret|exit)\b", re.IGNORECASE)
 
         for i, ln in enumerate(lines):
-            ln = ln.strip()
-            if not ln:
-                continue
             if self.labels.get(ln[:-1]) is not None:  # Label starts a new block
                 if current_block:
                     self.basic_blocks.append(current_block)
@@ -138,19 +135,19 @@ class PTXAnalyzer:
 
     def _build_cfg(self):
         for bid, block in enumerate(self.basic_blocks):
-            last_line = block[-1].strip()
-            if m := re.search(r"\bbra(?:\.uni)?\s+([a-zA-Z_$.][\w$.]*)", last_line):
-                target = m.group(1)
-                if target in self.labels:
-                    self.cfg[bid].append(self.line_to_block[self.labels[target]])
-            elif m := re.search(r"@(!?%[a-zA-Z_$.][\w$.]*)\s+bra\s+([a-zA-Z_$.][\w$.]*)", last_line):
+            last_line = block[-1]
+            if m := re.search(r"@(!?%[a-zA-Z_$.][\w$.]*)\s+bra\s+([a-zA-Z_$.][\w$.]*)", last_line):  # 条件跳转
                 target = m.group(2)
                 if target in self.labels:
                     self.cfg[bid].append(self.line_to_block[self.labels[target]])
                 if bid + 1 < len(self.basic_blocks):
-                    self.cfg[bid].append(bid + 1)  # Fall-through
-            elif not re.search(r"\b(?:ret|exit)\b", last_line) and bid + 1 < len(self.basic_blocks):
-                self.cfg[bid].append(bid + 1)  # Fall-through
+                    self.cfg[bid].append(bid + 1)
+            elif m := re.search(r"\bbra(?:\.uni)?\s+([a-zA-Z_$.][\w$.]*)", last_line):   # 无条件跳转
+                target = m.group(1)
+                if target in self.labels:
+                    self.cfg[bid].append(self.line_to_block[self.labels[target]])
+            elif not re.search(r"\b(?:ret|exit)\b", last_line) and bid + 1 < len(self.basic_blocks):  # 顺序执行
+                self.cfg[bid].append(bid + 1)
 
     def _detect_loops(self) -> List[Tuple[int, int]]:
         visited = set()
@@ -230,12 +227,10 @@ class PTXAnalyzer:
             counts_tuple = self._count_block_insts(b_idx)
             for key, val in zip(counts.keys(), counts_tuple):
                 counts[key][b_idx] = val
-
         visited = set()
         queue = deque([0])
         block_loop_map = self._find_block_loop_membership(loop_iters)
         totals = {k: 0 for k in counts}
-
         while queue:
             cur = queue.popleft()
             if cur in visited:
@@ -254,13 +249,16 @@ class PTXAnalyzer:
 
     def _count_block_insts(self, b_idx: int) -> Tuple[int, ...]:
         block_lines = self.basic_blocks[b_idx]
-        print(block_lines)
         ldg = stg = loc = shr = sy = fpc = inc = sfc = alc = 0
+        FP_SUFFIX = r"(?:\.[a-z0-9]+)*\.f(16|32|64)\b"
+        INT_SUFFIX = r"(?:\.[a-z0-9]+)*\.(s|u|b)(8|16|32|64)\b"
 
         patterns = {
-            'fp': re.compile(r"\b(add|sub|mul|div|rcp|ma)\.f(32|64|8|16)\b", re.IGNORECASE),
-            'int': re.compile(r"\b(add|sub|mul|div|rem|min|max|popc|clz|mov|mad|setp)\b", re.IGNORECASE),
-            'sfu': re.compile(r"\b(sin|cos|ex2|lg2|rcp|rsqrt|sqrt)\b", re.IGNORECASE),
+            'fp': re.compile(rf"\b(add|sub|mul|fma|mad|div|max|min|setp|selp){FP_SUFFIX}", re.IGNORECASE),
+            'int': re.compile(
+                rf"\b(add|sub|mul|mad|div|rem|max|min|setp|selp|mov|shl|shr|and|or|xor|not|popc|clz){INT_SUFFIX}",
+                re.IGNORECASE),
+            'sfu': re.compile(rf"\b(sin|cos|ex2|lg2|rcp|sqrt|rsqrt)(?:\.[a-z0-9]+)*\.f(32|64)\b", re.IGNORECASE),
             'mem': re.compile(r"\b(ld|st)\.(global|local|shared)\b", re.IGNORECASE),
             'sync': re.compile(r"\bbar\.sync\b", re.IGNORECASE)
         }
