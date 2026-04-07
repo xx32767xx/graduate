@@ -283,7 +283,6 @@ class PTXAnalyzer:
                 sfc += 1
             else:
                 alc += 1  # Default to ALU for unclassified instructions
-        print(f"(ldg, stg, loc, shr, sy, fpc, inc, sfc, alc):{(ldg, stg, loc, shr, sy, fpc, inc, sfc, alc)}")
         return (ldg, stg, loc, shr, sy, fpc, inc, sfc, alc)
 
     def _find_block_loop_membership(self, loop_iters: Dict[int, int]) -> Dict[int, Set[int]]:
@@ -314,31 +313,12 @@ class PTXAnalyzer:
             return (0.0, 0.0, 0.0)
 
         warp_size = self.arch.attrs.get('WARP_SIZE', 32)
-        stride_factor = self._analyze_memory_strides()  # existing function
-        max_coalesced = min(effective_block_x / float(warp_size), 1.0)
-        # This is the fraction that truly gets coalesced:
-        actual_coalesced = max_coalesced * stride_factor
+        stride = self._analyze_memory_strides()  # existing function
+        transactions = math.ceil(warp_size * stride * 4 / 128.0)
 
-        # We'll treat partial_coalescing as the fraction in-between
-        # 'actual_coalesced' and a slope-based guess from calibration
-        partial_slope = float(self.calib.get("partial_coalesce_slope", 0.0))
-        partial_intcp = float(self.calib.get("partial_coalesce_intercept", 0.0))
-
-        # Estimate partial fraction using a linear function of block_x offset
-        # for demonstration, say partial_fraction ~ slope*(effective_block_x) + intercept
-        guess_partial = partial_slope * effective_block_x + partial_intcp
-        guess_partial = max(0.0, min(guess_partial, 1.0))  # clamp 0..1
-
-        # The fraction that is definitely 'fully coalesced'
-        mem_coal_fraction = actual_coalesced * (1.0 - guess_partial)
-        # The fraction that is partial
-        mem_part_fraction = guess_partial * (1.0 - actual_coalesced)
-        # The fraction that is uncoalesced
-        mem_un_fraction   = 1.0 - (mem_coal_fraction + mem_part_fraction)
-
-        mem_coal = global_ops * mem_coal_fraction
-        mem_part = global_ops * mem_part_fraction
-        mem_un   = global_ops * mem_un_fraction
+        mem_coal = global_ops * (1.0 - stride)
+        mem_part = global_ops * stride * (1.0 if transactions <= 8 else 0.5)
+        mem_un = global_ops - mem_coal - mem_part
 
         return (mem_coal, mem_un, mem_part)
 

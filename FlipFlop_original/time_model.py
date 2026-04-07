@@ -214,14 +214,31 @@ class HongKimExecutionTimeModel:
 
         # ---- 6. MWP 修正（利用你已有的）----
         # 维持warp并行度（你原来的）
+        if global_count > 1e-9:
+            global_lat = (
+                mem_coal * lat_coal
+              + mem_uncoal * lat_uncoal
+              + mem_part   * lat_part
+            ) / global_count
+        else:
+            global_lat = 0.0
+        coalesce_eff = min(1.0, float(bx)/warp_size) if warp_size>0 else 1.0  # 计算线程合并效率
+        effective_global_lat = global_lat * (1.0 + (1.0 - coalesce_eff)*2.0)  # 更新有效显存访存延迟
+
         if mem_total > 0:
-            avg_mem_lat =  (mem_coal * lat_coal +
-                    mem_uncoal * lat_uncoal +
-                    mem_part * lat_part) / max(global_count, 1.0)
+            frac_global = global_count / mem_total if mem_total > 0 else 0.0
+            frac_local = mem_loc / mem_total if mem_total > 0 else 0.0
+            frac_shared = mem_shr / mem_total if mem_total > 0 else 0.0
+            avg_mem_lat = (
+                    effective_global_lat * frac_global
+                    + lat_local * frac_local
+                    + lat_shared * frac_shared
+            )
         else:
             avg_mem_lat = 0.0
         mem_dep = max(self.Dep_coal_s, 1e-9)
         MWP = avg_mem_lat / mem_dep if mem_dep > 1e-12 else 1.0
+
         # occupancy限制
         blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
         warps_per_sm = blocks_per_sm * warps_per_block
