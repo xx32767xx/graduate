@@ -102,7 +102,9 @@ class HongKimExecutionTimeModel:
             time_ns = (comp_cycles / self.arch.clock_rate_hz)*1e9 + self.baseline_ns
             return time_ns
 
-        # 计算显存访存延迟
+        ### 这里开始修改！！！！！！！！！！！！！
+        '''
+         # 计算显存访存延迟
         if global_count > 1e-9:
             global_lat = (
                 mem_coal * lat_coal
@@ -124,10 +126,7 @@ class HongKimExecutionTimeModel:
           + lat_local*frac_local
           + lat_shared*frac_shared
         )
-        mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
-        comp_cycles = comp_sum*self.issue_cycles    #计算周期
-        print(f"双方互不影响时 访存和计算的周期数: {mem_cycles},{comp_cycles}")
-
+        
         # 计算偏离延迟
         if global_count>1e-9:
             w_coal = mem_coal/global_count
@@ -146,10 +145,13 @@ class HongKimExecutionTimeModel:
                    + dd_shared*frac_shared)
         if mem_dep<1e-15:
             mem_dep=1e-15
-
         # 维持多少个Warp同时进行访存
         MWP_woBW_full = avg_mem_lat/mem_dep
         print(f"维持多少个Warp同时进行访存: {MWP_woBW_full}")
+        
+        mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
+        comp_cycles = comp_sum*self.issue_cycles    #计算周期
+        print(f"双方互不影响时 访存和计算的周期数: {mem_cycles},{comp_cycles}")
 
         # 硬件限制  N:单个SM不考虑其他约束时最多执行的warp数
         blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
@@ -172,11 +174,12 @@ class HongKimExecutionTimeModel:
         else:
             CWP_full = N
         CWP = min(CWP_full,N)
-
+        
         comp_p   = comp_cycles/mem_total if mem_total>0 else 0.0  # 平均每次访存操作伴随的计算开销
         Mem_cy   = mem_cycles
         Comp_cy  = comp_cycles
         reps     = self._calc_block_reps(total_blocks, blocks_per_sm)  # 理想波数
+        ```
 
         if abs(MWP-N)<1e-3 and abs(CWP-N)<1e-3:
             totalCycles = (Mem_cy + Comp_cy + comp_p*(MWP-1))*reps
@@ -185,13 +188,54 @@ class HongKimExecutionTimeModel:
         else:
             Mem_L_cycles = avg_mem_lat*self.arch.clock_rate_hz
             totalCycles  = (Mem_L_cycles + Comp_cy*N)*reps   # 完全串行
-
+            
         if mem_dep>1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
             depCycles   = mem_dep*self.arch.clock_rate_hz
             blocks_psm  = blocks_per_sm
             scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
             syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
             totalCycles+= syncCycles
+        '''
+
+        SFU_WEIGHT = 4.0
+        FLOPs = comp_fp + comp_int + comp_sfu * SFU_WEIGHT
+
+        bytes_per_access = 4.0  # float32
+        global_mem_access = mem_coal + mem_uncoal + mem_part
+        Bytes = global_mem_access * bytes_per_access
+
+        # ---- 4. Arithmetic Intensity ----
+        AI = FLOPs / max(Bytes, 1.0)
+        print(f"Roofline: FLOPs={FLOPs}, Bytes={Bytes}, AI={AI}")
+
+        # ---- 5. 硬件参数 ----
+        peak_flops = self.arch.peak_flops()  # 需要你实现
+        mem_bw = self.arch.memory_bandwidth_gbps() * 1e9
+
+        # ---- 6. MWP 修正（利用你已有的）----
+        # 维持warp并行度（你原来的）
+        if mem_total > 0:
+            avg_mem_lat =  (mem_coal * lat_coal +
+                    mem_uncoal * lat_uncoal +
+                    mem_part * lat_part) / max(global_count, 1.0)
+        else:
+            avg_mem_lat = 0.0
+        mem_dep = max(self.Dep_coal_s, 1e-9)
+        MWP = avg_mem_lat / mem_dep if mem_dep > 1e-12 else 1.0
+        # occupancy限制
+        blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
+        warps_per_sm = blocks_per_sm * warps_per_block
+        N = float(warps_per_sm)
+        MWP = min(max(1.0, MWP), N)
+
+        # ---- 7. 有效带宽 ----
+        bw_efficiency = min(1.0, MWP / N) if N > 0 else 1.0
+        effective_bw = mem_bw * bw_efficiency
+        # ---- 8. Roofline性能 ----
+        perf = min(
+            peak_flops,
+            AI * effective_bw
+        )
 
         block_dim_x, block_dim_y = bx, by
         ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
@@ -213,10 +257,10 @@ class HongKimExecutionTimeModel:
         base_factor = (shape_balance/ce_x) if ce_x>1e-9 else shape_balance
         shape_factor = 1.0 + (base_factor-1.0)/(1.0+compute_intensity)
         shape_factor = max(1.0, min(shape_factor,1.5))
-        totalCycles*= shape_factor
 
-        kernel_ns = (totalCycles/self.arch.clock_rate_hz)*1e9 + self.baseline_ns
-        return float(kernel_ns)
+        time_s = FLOPs / max(perf, 1e-9)
+        time_ns = time_s * 1e9 * shape_factor + self.baseline_ns
+        return float(time_ns)
 
     def _calc_blocks_per_sm(self, threads_per_block: int) -> int:   # 计算一个sm能有多少块
         """

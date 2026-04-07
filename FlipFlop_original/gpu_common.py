@@ -82,6 +82,15 @@ class GPUArchitecture:
             print(f"[WARNING] {self.arch_key} not found in {filename}. Using empty calibration.")
             return {}
 
+    def peak_flops(self):
+        sm_count = self.sm_count
+        clock = self.clock_rate_hz
+
+        # A100: 每SM 64 FP32/clk
+        fp32_per_sm = 64
+        return sm_count * fp32_per_sm * clock
+
+
 @dataclass
 class KernelAnalysis:
     mem_coal: int
