@@ -99,7 +99,7 @@ class HongKimExecutionTimeModel:
         if mem_total < 1:
             #单纯计算
             comp_cycles = comp_sum * self.issue_cycles
-            time_ns = (comp_cycles / self.arch.clock_rate_hz)*1e9 + self.baseline_ns
+            time_ns = (comp_cycles / self.arch.clock_rate_hz)*1e9
             return time_ns
 
         ### 这里开始修改！！！！！！！！！！！！！
@@ -296,7 +296,9 @@ class HongKimExecutionTimeModel:
         shape_factor = max(1.0, min(shape_factor,1.5))
 
         time_s = FLOPs / max(perf, 1e-9)
-        time_ns = time_s * 1e9 * shape_factor + self.baseline_ns
+        reps  = self._calc_block_reps(total_blocks, blocks_per_sm)
+        print(reps)
+        time_ns = time_s * 1e9 * shape_factor * reps + self.baseline_ns
         return float(time_ns)
 
     def _calc_blocks_per_sm(self, threads_per_block: int) -> int:   # 计算一个sm能有多少块

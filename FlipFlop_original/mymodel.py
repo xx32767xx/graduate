@@ -109,7 +109,7 @@ if __name__=="__main__":
     analysis= analysis_obj.analyze()
 
     # 5) Construct the estimator & estimate
-    estimator = HongKimExecutionTimeModel(arch, analysis, (grid_size,1), (block_size,1))
+    estimator = HongKimExecutionTimeModel(arch, analysis, (data_size/block_size,1), (block_size,1))
     estimated_ns= estimator.estimate_time_ns()
 
     # 6) Actual benchmark
