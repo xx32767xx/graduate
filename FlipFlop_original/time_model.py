@@ -199,7 +199,6 @@ class HongKimExecutionTimeModel:
 
         SFU_WEIGHT = 4.0
         FLOPs = comp_fp + comp_int + comp_sfu * SFU_WEIGHT
-
         bytes_per_access = 4.0  # float32
         global_mem_access = mem_coal + mem_uncoal + mem_part
         Bytes = global_mem_access * bytes_per_access
@@ -228,11 +227,7 @@ class HongKimExecutionTimeModel:
             frac_global = global_count / mem_total if mem_total > 0 else 0.0
             frac_local = mem_loc / mem_total if mem_total > 0 else 0.0
             frac_shared = mem_shr / mem_total if mem_total > 0 else 0.0
-            avg_mem_lat = (
-                    effective_global_lat * frac_global
-                    + lat_local * frac_local
-                    + lat_shared * frac_shared
-            ) / max(global_count, 1.0)
+            avg_mem_lat = effective_global_lat * frac_global + lat_local * frac_local + lat_shared * frac_shared
         else:
             avg_mem_lat = 0.0
 
@@ -251,9 +246,7 @@ class HongKimExecutionTimeModel:
             frac_global = global_count / mem_total if mem_total > 0 else 0.0
             frac_local = mem_loc / mem_total if mem_total > 0 else 0.0
             frac_shared = mem_shr / mem_total if mem_total > 0 else 0.0
-            mem_dep = (dd_global * frac_global
-                   + dd_local * frac_local
-                   + dd_shared * frac_shared)
+            mem_dep = dd_global * frac_global  + dd_local * frac_local + dd_shared * frac_shared
         else:
             mem_dep = 0
         mem_dep = max(mem_dep, 1e-9)
