@@ -224,7 +224,6 @@ class HongKimExecutionTimeModel:
             global_lat = 0.0
         coalesce_eff = min(1.0, float(bx)/warp_size) if warp_size>0 else 1.0  # 计算线程合并效率
         effective_global_lat = global_lat * (1.0 + (1.0 - coalesce_eff)*2.0)  # 更新有效显存访存延迟
-
         if mem_total > 0:
             frac_global = global_count / mem_total if mem_total > 0 else 0.0
             frac_local = mem_loc / mem_total if mem_total > 0 else 0.0
@@ -233,10 +232,32 @@ class HongKimExecutionTimeModel:
                     effective_global_lat * frac_global
                     + lat_local * frac_local
                     + lat_shared * frac_shared
-            )
+            ) / max(global_count, 1.0)
         else:
             avg_mem_lat = 0.0
-        mem_dep = max(self.Dep_coal_s, 1e-9)
+
+        if global_count > 1e-9:
+            w_coal = mem_coal / global_count
+            w_un = mem_uncoal / global_count
+            w_part = mem_part / global_count
+            dd_global = (w_coal * self.Dep_coal_s
+                         + w_un * self.Dep_uncoal_s
+                         + w_part * self.Dep_part_s)
+        else:
+            dd_global = 0.0
+        dd_local = self.Dep_local_s
+        dd_shared = self.Dep_shared_s
+        if mem_total > 0:
+            frac_global = global_count / mem_total if mem_total > 0 else 0.0
+            frac_local = mem_loc / mem_total if mem_total > 0 else 0.0
+            frac_shared = mem_shr / mem_total if mem_total > 0 else 0.0
+            mem_dep = (dd_global * frac_global
+                   + dd_local * frac_local
+                   + dd_shared * frac_shared)
+        else:
+            mem_dep = 0
+        mem_dep = max(mem_dep, 1e-9)
+        print(f"avg_mem_lat={avg_mem_lat}, mem_dep={mem_dep}")
         MWP = avg_mem_lat / mem_dep if mem_dep > 1e-12 else 1.0
 
         # occupancy限制
@@ -246,13 +267,18 @@ class HongKimExecutionTimeModel:
         MWP = min(max(1.0, MWP), N)
 
         # ---- 7. 有效带宽 ----
-        bw_efficiency = min(1.0, MWP / N) if N > 0 else 1.0
-        effective_bw = mem_bw * bw_efficiency
+        if AI > 10:  # 高计算强度，视为理想带宽
+            effective_bw = mem_bw
+        else:
+            bw_efficiency = min(1.0, MWP / N) if N > 0 else 1.0
+            effective_bw = mem_bw * bw_efficiency
+
         # ---- 8. Roofline性能 ----
         perf = min(
             peak_flops,
             AI * effective_bw
         )
+        print(f"peak_flops: {peak_flops}, AI * effective_bw: {AI * effective_bw}    perf: {perf}")
 
         block_dim_x, block_dim_y = bx, by
         ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率

@@ -1,25 +1,20 @@
-__global__ void complex_flow_kernel(float* a, float* b, float* c, int N) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+extern "C" __global__
+void compute_bound_kernel(float* out, int N) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (i < N) {
-        float val_a = a[i];
-        float val_b = b[i];
-        float res;
+    if (tid >= N) return;
 
-        if (val_a > 0.0f) {
-            float temp = __expf(val_a);
-            res = __fmaf_rn(temp, val_b, 1.0f);
+    float x = (float)tid * 0.001f;
+    float y = x + 1.0f;
 
-            for (int j = 0; j < 2; j++) {
-                res = __fsqrt_rn(res + (float)j);
-            }
-        } else {
-            if (val_a < -10.0f) {
-                res = 0.0f;
-            } else {
-                res = val_a * val_b + 0.5f;
-            }
-        }
-        c[i] = res;
+    #pragma unroll 128
+    for (int i = 0; i < 512; i++) {
+        x = __fmaf_rn(x, y, 1.0f);
+        y = __fmaf_rn(y, x, 0.5f);
+
+        x = x * 1.000001f + 0.000001f;
+        y = y * 0.999999f + 0.000002f;
     }
+
+    out[tid] = x + y;
 }
