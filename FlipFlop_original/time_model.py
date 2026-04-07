@@ -250,6 +250,7 @@ class HongKimExecutionTimeModel:
         else:
             mem_dep = 0
         mem_dep = max(mem_dep, 1e-9)
+
         print(f"avg_mem_lat={avg_mem_lat}, mem_dep={mem_dep}")
         MWP = avg_mem_lat / mem_dep if mem_dep > 1e-12 else 1.0
 
@@ -260,7 +261,7 @@ class HongKimExecutionTimeModel:
         MWP = min(max(1.0, MWP), N)
 
         # ---- 7. 有效带宽 ----
-        if AI > 10:  # 高计算强度，视为理想带宽
+        if AI > 12.5:  # 高计算强度，视为理想带宽
             effective_bw = mem_bw
         else:
             bw_efficiency = min(1.0, MWP / N) if N > 0 else 1.0

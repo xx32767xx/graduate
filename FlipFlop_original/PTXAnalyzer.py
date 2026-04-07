@@ -240,7 +240,7 @@ class PTXAnalyzer:
             for lh in block_loop_map[cur]:
                 iteration_factor *= loop_iters.get(lh, 1)
             for k in totals:
-                totals[k] += counts[k][cur] * iteration_factor
+                totals[k] += counts[k][cur] * 1
             for nxt in self.cfg[cur]:
                 if nxt not in visited:
                     queue.append(nxt)
