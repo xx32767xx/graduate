@@ -270,6 +270,14 @@ class HongKimExecutionTimeModel:
             peak_flops,
             AI * effective_bw
         )
+        max_threads = self.arch.attrs['MAX_THREADS_PER_MULTIPROCESSOR']
+        warp_size = self.arch.attrs.get('WARP_SIZE', 32)
+        max_warps_per_sm = max_threads // warp_size
+        max_warps_total = self.arch.sm_count * max_warps_per_sm
+        parallel_efficiency = min(1.0, total_warps / max_warps_total)
+        perf *= parallel_efficiency
+        issue_rate = self.arch.sm_count * self.arch.clock_rate_hz
+        perf = min(perf, issue_rate * warp_size)
         print(f"peak_flops: {peak_flops}, AI * effective_bw: {AI * effective_bw}    perf: {perf}")
 
         # 形状因子计算
