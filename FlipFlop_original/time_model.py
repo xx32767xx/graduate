@@ -202,16 +202,14 @@ class HongKimExecutionTimeModel:
         bytes_per_access = 4.0  # float32
         global_mem_access = mem_coal + mem_uncoal + mem_part
         Bytes = global_mem_access * bytes_per_access
-
-        # ---- 4. Arithmetic Intensity ----
         AI = FLOPs / max(Bytes, 1.0)
         print(f"Roofline: FLOPs={FLOPs}, Bytes={Bytes}, AI={AI}")
 
-        # ---- 5. 硬件参数 ----
+        # 硬件参数
         peak_flops = self.arch.peak_flops()  # 需要你实现
         mem_bw = self.arch.memory_bandwidth_gbps() * 1e9
 
-        # ---- 6. MWP 修正（利用你已有的）----
+        # MWP 修正（利用你已有的)
         # 维持warp并行度（你原来的）
         if global_count > 1e-9:
             global_lat = (
@@ -260,20 +258,21 @@ class HongKimExecutionTimeModel:
         N = float(warps_per_sm)
         MWP = min(max(1.0, MWP), N)
 
-        # ---- 7. 有效带宽 ----
+        # 有效带宽
         if AI > 12.5:  # 高计算强度，视为理想带宽
             effective_bw = mem_bw
         else:
             bw_efficiency = min(1.0, MWP / N) if N > 0 else 1.0
             effective_bw = mem_bw * bw_efficiency
 
-        # ---- 8. Roofline性能 ----
+        # Roofline性能 -
         perf = min(
             peak_flops,
             AI * effective_bw
         )
         print(f"peak_flops: {peak_flops}, AI * effective_bw: {AI * effective_bw}    perf: {perf}")
 
+        # 形状因子计算
         block_dim_x, block_dim_y = bx, by
         ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
         aspect_ratio = float(block_dim_x)/(block_dim_y if block_dim_y>0 else 1.0)  
@@ -295,9 +294,19 @@ class HongKimExecutionTimeModel:
         shape_factor = 1.0 + (base_factor-1.0)/(1.0+compute_intensity)
         shape_factor = max(1.0, min(shape_factor,1.5))
 
+        FLOPs_per_block = FLOPs / max(total_blocks, 1)
+        time_per_block = FLOPs_per_block / max(perf, 1e-9)
+        blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
+        blocks_per_round = blocks_per_sm * self.arch.sm_count
+        reps = math.ceil(total_blocks / max(blocks_per_round, 1))
+
+        #  occupancy 修正（可选但推荐）
+        max_warps_sm = self.arch.attrs.get("MAX_WARPS_PER_MULTIPROCESSOR", 64)
+        occ = min(1.0, (blocks_per_sm * warps_per_block) / max_warps_sm)
+        occ = max(occ, 1e-3)
+        time_per_block /= occ
+
         time_s = FLOPs / max(perf, 1e-9)
-        reps  = self._calc_block_reps(total_blocks, blocks_per_sm)
-        print(reps)
         time_ns = time_s * 1e9 * shape_factor * reps + self.baseline_ns
         return float(time_ns)
 
