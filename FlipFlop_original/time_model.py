@@ -66,24 +66,24 @@ class HongKimExecutionTimeModel:
         total_warps       = total_blocks * warps_per_block
 
         # 访存指令
-        mem_coal   = float(self.analysis.mem_coal   )
+        mem_coal   = float(self.analysis.mem_coal )
         mem_uncoal = float(self.analysis.mem_uncoal )
         mem_part   = float(self.analysis.mem_partial)
-        mem_loc    = float(self.analysis.local_insts )   #局部内存 显存溢出
+        mem_loc    = float(self.analysis.local_insts)   #局部内存 显存溢出
         mem_shr    = float(self.analysis.shared_insts)   #共享内存 不过显存
 
         global_count = mem_coal + mem_uncoal + mem_part     #过显存次数
         mem_total    = global_count + mem_loc + mem_shr     #所有访存次数
 
         # 计算指令
-        comp_fp  = float(self.analysis.fp_insts  )
-        comp_int = float(self.analysis.int_insts )
-        comp_sfu = float(self.analysis.sfu_insts )
-        comp_alu = float(self.analysis.alu_insts )
+        comp_fp  = float(self.analysis.fp_insts )
+        comp_int = float(self.analysis.int_insts)
+        comp_sfu = float(self.analysis.sfu_insts)
+        comp_alu = float(self.analysis.alu_insts)
         comp_sum = comp_fp + comp_int + comp_sfu + comp_alu
 
         # 同步指令
-        sync_count = float(self.analysis.synch_insts )
+        sync_count = float(self.analysis.synch_insts)
 
         # 换算访存延迟单位到秒
         lat_coal   = self.Mem_coal_ns   * 1e-9
@@ -122,9 +122,10 @@ class HongKimExecutionTimeModel:
           + lat_local*frac_local
           + lat_shared*frac_shared
         )
-
+        print(f"mem_total:{mem_total}    avg_mem_lat:{avg_mem_lat}")
         mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
         comp_cycles = comp_sum*self.issue_cycles    #计算周期
+        print(f"comp_cycles:{comp_cycles} mem_cycles:{mem_cycles}")
 
         # 计算偏离延迟
         if global_count>1e-9:
@@ -151,9 +152,10 @@ class HongKimExecutionTimeModel:
         # 硬件限制  N:单个SM不考虑其他约束时最多执行的warp数
         blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
         warps_per_sm  = blocks_per_sm*warps_per_block
-        N_actual = max(1.0, total_warps / self.arch.sm_count)
-        N = min(float(warps_per_sm), N_actual)
+        N = float(warps_per_sm)
         MWP_woBW = min(MWP_woBW_full, N)
+        print(f"blocks_per_sm:{blocks_per_sm} warps_per_block:{warps_per_block} N:{N}")
+
 
         # 带宽限制
         memBW_Bps = self.arch.memory_bandwidth_gbps()*1e9
@@ -170,42 +172,45 @@ class HongKimExecutionTimeModel:
             CWP_full = N
         CWP = min(CWP_full,N)
 
-        comp_p   = comp_cycles/mem_total if mem_total>0 else 0.0  # 平均每次访存操作伴随的计算开销
+        comp_p   = comp_cycles/mem_total if mem_total>0 else 0.0
         Mem_cy   = mem_cycles
         Comp_cy  = comp_cycles
         reps     = self._calc_block_reps(total_blocks, blocks_per_sm)  # 理想波数
 
-        # pick formula
-        if N <= MWP:
-            totalCycles = (avg_mem_lat * self.arch.clock_rate_hz) + (comp_sum * self.issue_cycles)
-        else:
-            totalCycles = (avg_mem_lat * self.arch.clock_rate_hz) * (N / MWP)
 
-        '''
         if abs(MWP-N)<1e-3 and abs(CWP-N)<1e-3:
-            # case: MWP==N && CWP==N
-            totalCycles = (Mem_cy + Comp_cy + comp_p*(MWP-1))*reps
+            totalCycles = (Mem_cy + Comp_cy + comp_p*(MWP-1)) * reps
+            print("abs(MWP-N)<1e-3 and abs(CWP-N)<1e-3")
         elif CWP>=MWP or (Comp_cy>Mem_cy):
-            totalCycles = (Mem_cy*(N/MWP) + comp_p*(MWP-1))*reps
+            totalCycles = (Mem_cy*(N/MWP) + comp_p*(MWP-1))* reps
+            print("CWP>=MWP or (Comp_cy>Mem_cy")
         else:
             Mem_L_cycles = avg_mem_lat*self.arch.clock_rate_hz
-            totalCycles  = (Mem_L_cycles + Comp_cy*N)*reps   # 完全串行
-        '''
+            totalCycles  = (Mem_L_cycles + Comp_cy*N) * reps   # 完全串行
+            print("else")
+
 
         # sync overhead
         if mem_dep>1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
             depCycles   = mem_dep*self.arch.clock_rate_hz
             blocks_psm  = blocks_per_sm
             scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
-            syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
+            #syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
+            syncCycles = depCycles * (warps_per_block - 1) * scount * reps
             totalCycles+= syncCycles
+            print(f"sync_cycle:{syncCycles}")
 
         # shape factor corrections
         block_dim_x, block_dim_y = bx, by
-        ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
+        #() ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
+        ptx_stride_efficiency = self.analysis.mem_coal / max(self.analysis.mem_coal + self.analysis.mem_uncoal, 1)
+        ce_x = max(float(bx) / warp_size, ptx_stride_efficiency)
+
         aspect_ratio = float(block_dim_x)/(block_dim_y if block_dim_y>0 else 1.0)
         calibrated_shape_alpha = self.arch.calibration_data.get("shape_occupancy_factor", 0.2)
-        shape_balance = 1.0 + calibrated_shape_alpha * abs(math.log(max(aspect_ratio,1e-6))) # 形状平衡惩罚
+        # ()shape_balance = 1.0 + calibrated_shape_alpha * abs(math.log(max(aspect_ratio,1e-6))) # 形状平衡惩罚
+        log_ratio = math.log2(max(aspect_ratio, 1.0 / max(aspect_ratio, 1e-6)))
+        shape_balance = 1.0 + (calibrated_shape_alpha * log_ratio / 10.0)
 
         total_compute = (self.analysis.fp_insts
                        + self.analysis.int_insts
@@ -224,8 +229,9 @@ class HongKimExecutionTimeModel:
 
         totalCycles*= shape_factor
         # 4. 加上波数
-
-        kernel_ns = (totalCycles * reps / self.arch.clock_rate_hz) * 1e9 + self.baseline_ns
+        print(f"N:{N} MWP:{MWP}  CWP:{CWP} mem_cy:{Mem_cy} comp_cy:{Comp_cy}   shapef:{shape_factor} base_ns:{self.baseline_ns}")
+        print(f"reps:{reps}")
+        kernel_ns = (totalCycles / self.arch.clock_rate_hz) * 1e9 + self.baseline_ns
         return float(kernel_ns)
 
     def _calc_blocks_per_sm(self, threads_per_block: int) -> int:   # 计算一个sm能有多少块

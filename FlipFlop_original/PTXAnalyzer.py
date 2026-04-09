@@ -178,7 +178,7 @@ class PTXAnalyzer:
                 loop_iters[head] = user_loops[labelname]
             else:
                 # Heuristic: use block_x as default iteration count
-                loop_iters[head] = self.block_x
+                loop_iters[head] = 1
         return loop_iters
 
     def _block_start_line(self, b_idx: int) -> int:
@@ -283,6 +283,7 @@ class PTXAnalyzer:
                 sfc += 1
             else:
                 alc += 1  # Default to ALU for unclassified instructions
+
         return (ldg, stg, loc, shr, sy, fpc, inc, sfc, alc)
 
     def _find_block_loop_membership(self, loop_iters: Dict[int, int]) -> Dict[int, Set[int]]:
