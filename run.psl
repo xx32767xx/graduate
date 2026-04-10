@@ -1,0 +1,19 @@
+# 2. 定义变量
+$KERNEL_FILE = "kernels\mha.cu"
+$BATCH_SIZE = 4
+$SEQ_LENS = "512"
+$NHEAD = 16
+$DIM_PER_HEAD = 256
+$CSV_OUT = "rq3_data\full_energy_results.csv"
+$ITERATIONS =
+$CALIB_FILE = "calibration.json"
+
+# 3. 创建输出目录 (等同于 mkdir -p)
+$csvDir = Split-Path -Path $CSV_OUT -Parent
+if (!(Test-Path $csvDir)) {
+    New-Item -ItemType Directory -Path $csvDir
+}
+
+# 4. 执行 NCU 性能分析
+# 注意：Windows 下 python 命令通常直接是 python
+ncu --launch-count 10  --kernel-name-base demangled --metrics smsp__warps_active.avg,smsp__warps_eligible.avg,smsp__warp_issue_stalled_memory_dependency.avg --set full  --target-processes all python -m mymodel --kernel_file kernels\mha.cu --batch_size 4  --seq_lens 2048     --nhead 16      --dim_per_head 256     --calib calibration.json      --csv_out "rq3_data\full_energy_results.csv"     --iterations 5

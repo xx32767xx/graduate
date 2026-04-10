@@ -11,20 +11,20 @@ NHEAD=16
 DIM_PER_HEAD=256
 CSV_OUT="rq3_data/full_energy_results.csv"
 ITERATIONS=5
-CALIB_FILE="calibration/calibration.json"
+CALIB_FILE="calibration.json"
 
 # Create output directory
 mkdir -p "$(dirname "$CSV_OUT")"
 
+
 # Run the Python script
 ncu \
-  --target-processes all \
-  --launch-count 1 \
+  --launch-count 10 \
   --kernel-name-base demangled \
-  --metrics \
-    smsp__warps_active.avg,\
-    smsp__warps_eligible.avg,\
-    smsp__warp_issue_stalled_memory_dependency.avg \
+  --metrics smsp__warps_active.avg,smsp__warps_eligible.avg,smsp__warp_issue_stalled_memory_dependency.avg \
+  --set full \
+  --target-processes all \
+
   python3 -m mymodel \
     --kernel_file "${KERNEL_FILE}" \
     --batch_size 4 \

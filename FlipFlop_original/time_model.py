@@ -114,7 +114,7 @@ class HongKimExecutionTimeModel:
         frac_shared = mem_shr / mem_total      if mem_total>0 else 0.0
 
         coalesce_eff = min(1.0, float(bx)/warp_size) if warp_size>0 else 1.0  # 计算线程合并效率
-        effective_global_lat = global_lat * (1.0 + (1.0 - coalesce_eff)*2.0)  # 更新有效显存访存延迟
+        effective_global_lat = global_lat * coalesce_eff  # 更新有效显存访存延迟
 
         # 计算所有访存延迟
         avg_mem_lat = (
@@ -146,16 +146,14 @@ class HongKimExecutionTimeModel:
         if mem_dep<1e-15:
             mem_dep=1e-15
 
-        # 维持多少个Warp同时进行访存
-        MWP_woBW_full = avg_mem_lat/mem_dep
-
         # 硬件限制  N:单个SM不考虑其他约束时最多执行的warp数
         blocks_per_sm = self._calc_blocks_per_sm(threads_per_block)
-        warps_per_sm  = blocks_per_sm*warps_per_block
+        warps_per_sm  = blocks_per_sm * warps_per_block
         N = float(warps_per_sm)
-        MWP_woBW = min(MWP_woBW_full, N)
-        print(f"blocks_per_sm:{blocks_per_sm} warps_per_block:{warps_per_block} N:{N}")
 
+        # 维持多少个Warp同时进行访存
+        MWP_woBW_full = avg_mem_lat/mem_dep
+        MWP_woBW = min(MWP_woBW_full, N)
 
         # 带宽限制
         memBW_Bps = self.arch.memory_bandwidth_gbps()*1e9
@@ -164,6 +162,7 @@ class HongKimExecutionTimeModel:
         sm_bw     = memBW_Bps/max(self.arch.sm_count,1)  #单个sm分到的带宽
         MWP_peak_BW = sm_bw/warp_bw if warp_bw>1e-9 else 1e6
         MWP = min(MWP_woBW, MWP_peak_BW, N)
+        print(f"blocks_per_sm:{blocks_per_sm} warps_per_block:{warps_per_block} N:{N} MWP_woBW:{MWP_woBW} MWP_peak_BW:{MWP_peak_BW} ")
 
         # 计算多少warp计算能覆盖访存
         if comp_cycles>1e-9:
@@ -251,10 +250,10 @@ class HongKimExecutionTimeModel:
 
         max_shm_sm = arch_attrs['MAX_SHARED_MEMORY_PER_MULTIPROCESSOR']
         shared_need = self.analysis.shared_mem_bytes
-        smlim = max_shm_sm//shared_need if shared_need>0 else tlim
+        share_mem_lim = max_shm_sm//shared_need if shared_need>0 else tlim
 
         hw_blocklim   = arch_attrs.get('MAX_BLOCKS_PER_MULTIPROCESSOR',16)
-        blocks_possible = min(tlim, rlim, smlim, hw_blocklim)
+        blocks_possible = min(tlim, rlim, share_mem_lim, hw_blocklim)
         return max(1, blocks_possible)
 
     def _calc_block_reps(self, total_blocks: int, blocks_per_sm: int) -> float:

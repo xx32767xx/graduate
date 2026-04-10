@@ -9,7 +9,7 @@
 //    - dst: [beam_size, v_col]
 // Externally allocated shared memory must have size >= (dim_per_head + n_steps) * sizeof(float).
 // THRESHOLD is passed as an argument.
-// 
+//
 // Assumes that n_steps <= blockDim.x (blockDim.x is fixed to 256).
 // For larger sequence lengths, further looping is needed.
 
