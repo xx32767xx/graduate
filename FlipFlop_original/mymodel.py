@@ -150,33 +150,28 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         start = cuda.Event()
         end = cuda.Event()
 
-        # warmup（很重要）
-        for _ in range(10):
-            kernel(
-                y_gpu, res_gpu,
-                stride_batch, stride_nhead,
-                stride_batch, stride_nhead,
-                a_gpu, stride_batch, stride_nhead,
-                b_gpu, stride_batch, stride_nhead,
-                w_gpu,
-                np.int64(nhead), np.int64(dim), epsilon,
-                block=(block_x,block_y), grid=(batch_size * nhead, 1)
-            )
+        kernel.prepare("PPqqqqPPqqPPqqPqqf")
+        grid_dim = (int(batch_size * nhead), 1)
+        block_dim = (int(block_x), int(block_y), 1)
 
-        # timing
+        kernel_args = (
+            y_gpu, res_gpu,  # Tdata* y, Tdata* residual_out
+            stride_batch, stride_nhead,  # ptrdiff_t stride_y_batch, stride_y_nhead
+            stride_batch, stride_nhead,  # ptrdiff_t stride_residual_out_batch, nhead
+            a_gpu, stride_batch, stride_nhead,  # const Tdata* a, strides...
+            b_gpu, stride_batch, stride_nhead,  # const Tdata* b, strides...
+            w_gpu,  # const Tweight* w
+            np.int64(nhead),  # size_t nhead
+            np.int64(dim),  # size_t dim
+            np.float32(epsilon)  # float epsilon
+        )
+
+        for _ in range(10):
+            kernel.prepared_call(grid_dim, block_dim, *kernel_args)
+
         start.record()
         for _ in range(50):
-            kernel(
-                y_gpu, res_gpu,
-                stride_batch, stride_nhead,
-                stride_batch, stride_nhead,
-                a_gpu, stride_batch, stride_nhead,
-                b_gpu, stride_batch, stride_nhead,
-                w_gpu,
-                np.int64(nhead), np.int64(dim), epsilon,
-                block=(block_x, block_y), grid=(batch_size * nhead, 1)
-            )
-
+            kernel.prepared_call(grid_dim, block_dim, *kernel_args)
         end.record()
         end.synchronize()
 

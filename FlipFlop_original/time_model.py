@@ -125,7 +125,6 @@ class HongKimExecutionTimeModel:
         print(f"mem_total:{mem_total}    avg_mem_lat:{avg_mem_lat}")
         mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
         comp_cycles = comp_sum*self.issue_cycles    #计算周期
-        print(f"comp_cycles:{comp_cycles} mem_cycles:{mem_cycles}")
 
         # 计算偏离延迟
         if global_count>1e-9:
@@ -194,8 +193,7 @@ class HongKimExecutionTimeModel:
             depCycles   = mem_dep*self.arch.clock_rate_hz
             blocks_psm  = blocks_per_sm
             scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
-            #syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
-            syncCycles = depCycles * (warps_per_block - 1) * scount * reps
+            syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
             totalCycles+= syncCycles
             print(f"sync_cycle:{syncCycles}")
 
@@ -228,8 +226,7 @@ class HongKimExecutionTimeModel:
 
         totalCycles*= shape_factor
         # 4. 加上波数
-        print(f"N:{N} MWP:{MWP}  CWP:{CWP} mem_cy:{Mem_cy} comp_cy:{Comp_cy}   shapef:{shape_factor} base_ns:{self.baseline_ns}")
-        print(f"reps:{reps}")
+        print(f"N:{N} MWP:{MWP}  CWP:{CWP} mem_cy:{Mem_cy} comp_cy:{Comp_cy}   shapef:{shape_factor} base_ns:{self.baseline_ns} reps:{reps}")
         kernel_ns = (totalCycles / self.arch.clock_rate_hz) * 1e9 + self.baseline_ns
         return float(kernel_ns)
 
