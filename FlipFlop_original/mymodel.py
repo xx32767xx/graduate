@@ -177,7 +177,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         end.synchronize()
 
         time_ms = start.time_till(end) / 50 * 1e6
-        print(f"Avg time: {time_ms:.3f} ns   est_time_ns:{est_time_ns:.3f} ns")
+        print(f"Avg time: {time_ms:.3f} ns   est_time_ns:{est_time_ns:.3f} ns\n\n\n")
 
     return bench_results
 
