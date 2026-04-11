@@ -116,6 +116,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
     kernel = mod.get_function(kname)
 
     for block_x, block_y in block_combos:
+        print(f"blocks: {block_x}, {block_y}  \n\n\n")
         analyzer = PTXAnalyzer(ptx_str, ptxas_log, kernel_arch, block_x, block_y, {})
         analysis = analyzer.analyze()
 
