@@ -4,7 +4,7 @@ export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 export PYTHONPATH=$(pwd)/../../..
 
-KERNEL_FILE="~/infini/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu "
+KERNEL_FILE="~/infini/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu"
 BATCH_SIZE=4
 SEQ_LENS="512"
 NHEAD=16

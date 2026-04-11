@@ -1,7 +1,5 @@
 import argparse
-import time
 
-import kernel_tuner
 import pycuda.driver as cuda
 from kernel_tuner.observers.nvml import NVMLObserver
 from pycuda.compiler import SourceModule, compile
@@ -14,6 +12,8 @@ from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
 import pycuda.autoinit
+from pycuda.compiler import SourceModule
+
 
 def compile_kernel(kernel_path: str, arch_options:list[str]):
     with open(kernel_path, 'r') as f:
@@ -59,8 +59,8 @@ def prepare_add_rmsnorm_args(batch_size, dim, nhead):
 
     # 3. 计算步长 (Strides) - 对应源码中的 _info.a_strides 等
     # 假设内存是连续排布的 (Contiguous)
-    stride_batch = nhead * dim
-    stride_nhead = dim
+    stride_batch = np.int64(nhead * dim)
+    stride_nhead = np.int64(dim)
 
     # 4. 配置参数
     epsilon = np.float32(1e-5)
@@ -79,8 +79,8 @@ def prepare_add_rmsnorm_args(batch_size, dim, nhead):
         stride_batch,  # stride_b_batch
         stride_nhead,  # stride_b_nhead
         weight,  # 权重 w
-        np.uint64(nhead),
-        np.uint64(dim),
+        np.int32(nhead),
+        np.int32(dim),
         epsilon
     ]
 
@@ -110,15 +110,10 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         "-I/usr/local/cuda/include/cub",
     ]
 
-    nvml_observer = NVMLObserver(["nvml_energy", "nvml_power"])
-    dim_feature = nhead * dim_per_head
-    kernel_args = prepare_add_rmsnorm_args(batch_size, dim_feature, nhead)
     block_combos = generate_block_combinations()
     bench_results = []
-    shared_mem_size = (dim_per_head + seq_length) * 4
-    with open(kernel_path) as f:
-        kernel_src = f.read()
     mod, ptx_str, ptxas_log, kname = compile_kernel(kernel_path,arch_options)
+    kernel = mod.get_function(kname)
 
     for block_x, block_y in block_combos:
         analyzer = PTXAnalyzer(ptx_str, ptxas_log, kernel_arch, block_x, block_y, {})
@@ -128,35 +123,65 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
             kernel_arch, analysis, (batch_size * nhead, 1), (block_x, block_y))
         est_time_ns = time_model.estimate_time_ns()
 
-        time.sleep(100)
-        bench_results, _ = kernel_tuner.tune_kernel(
-            kernel_name=kname,
-            kernel_source=kernel_src,
-            problem_size=(batch_size * nhead, 1),
-            arguments=kernel_args,
-            tune_params={"block_size_x": [block_x], "block_size_y": [block_y]},
-            compiler_options=arch_options,
-            smem_args={"size": shared_mem_size},
-            observers=[nvml_observer],
-            metrics={"time_ns": lambda p: p["time"] * 1e6},
-            iterations=iterations,
-            verbose=False
-        )
+        batch_size = 4
+        nhead = 32
+        dim = 128
 
-        entry = {
-            "seq_len": seq_length,
-            "block_x": block_x,
-            "block_y": block_y,
-            "thread_count": block_x * block_y,
-            "predicted_time_ns": est_time_ns,
-            "predicted_power": 0,
-            "actual_time_ns": bench_results[0]["time_ns"],
-            "actual_power": np.mean(bench_results[0]["nvml_power"]),
-            **analysis.__dict__
-        }
+        a = np.random.randn(batch_size, nhead, dim).astype(np.float32)
+        b = np.random.randn(batch_size, nhead, dim).astype(np.float32)
+        w = np.random.randn(dim).astype(np.float32)
+        y = np.zeros_like(a)
+        residual_out = np.zeros_like(a)
+        stride_batch = np.int64(nhead * dim)
+        stride_nhead = np.int64(dim)
+        epsilon = np.float32(1e-5)
 
-        print(entry)
-        bench_results.append(entry)
+        a_gpu = cuda.mem_alloc(a.nbytes)
+        b_gpu = cuda.mem_alloc(b.nbytes)
+        w_gpu = cuda.mem_alloc(w.nbytes)
+
+        y_gpu = cuda.mem_alloc(y.nbytes)
+        res_gpu = cuda.mem_alloc(residual_out.nbytes)
+
+        cuda.memcpy_htod(a_gpu, a)
+        cuda.memcpy_htod(b_gpu, b)
+        cuda.memcpy_htod(w_gpu, w)
+
+        start = cuda.Event()
+        end = cuda.Event()
+
+        # warmup（很重要）
+        for _ in range(10):
+            kernel(
+                y_gpu, res_gpu,
+                stride_batch, stride_nhead,
+                stride_batch, stride_nhead,
+                a_gpu, stride_batch, stride_nhead,
+                b_gpu, stride_batch, stride_nhead,
+                w_gpu,
+                np.int64(nhead), np.int64(dim), epsilon,
+                block=(block_x,block_y), grid=(batch_size * nhead, 1)
+            )
+
+        # timing
+        start.record()
+        for _ in range(50):
+            kernel(
+                y_gpu, res_gpu,
+                stride_batch, stride_nhead,
+                stride_batch, stride_nhead,
+                a_gpu, stride_batch, stride_nhead,
+                b_gpu, stride_batch, stride_nhead,
+                w_gpu,
+                np.int64(nhead), np.int64(dim), epsilon,
+                block=(block_x, block_y), grid=(batch_size * nhead, 1)
+            )
+
+        end.record()
+        end.synchronize()
+
+        time_ms = start.time_till(end) / 50 * 1e6
+        print(f"Avg time: {time_ms:.3f} ns   est_time_ns:{est_time_ns:.3f} ns")
 
     return bench_results
 
@@ -185,10 +210,10 @@ if __name__=="__main__":
 
     for seq_len in seq_lens:
         print(f"Processing seq_len={seq_len}...")
-        results = run_configuration(args.kernel_file, arch, args.batch_size, seq_len,
+        run_configuration(args.kernel_file, arch, args.batch_size, seq_len,
             args.nhead, args.dim_per_head, args.iterations
         )
-        print(results)
+
 
 
 
