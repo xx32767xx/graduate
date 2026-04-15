@@ -199,13 +199,11 @@ class HongKimExecutionTimeModel:
 
         # shape factor corrections
         block_dim_x, block_dim_y = bx, by
-        #() ce_x = min(1.0, float(block_dim_x)/warp_size) if warp_size>0 else 1.0    # X维度的内存合并效率
         ptx_stride_efficiency = self.analysis.mem_coal / max(self.analysis.mem_coal + self.analysis.mem_uncoal, 1)
         ce_x = max(float(bx) / warp_size, ptx_stride_efficiency)
 
         aspect_ratio = float(block_dim_x)/(block_dim_y if block_dim_y>0 else 1.0)
         calibrated_shape_alpha = self.arch.calibration_data.get("shape_occupancy_factor", 0.2)
-        # ()shape_balance = 1.0 + calibrated_shape_alpha * abs(math.log(max(aspect_ratio,1e-6))) # 形状平衡惩罚
         log_ratio = math.log2(max(aspect_ratio, 1.0 / max(aspect_ratio, 1e-6)))
         shape_balance = 1.0 + (calibrated_shape_alpha * log_ratio / 10.0)
 
@@ -227,7 +225,7 @@ class HongKimExecutionTimeModel:
         totalCycles*= shape_factor
         # 4. 加上波数
         print(f"N:{N} MWP:{MWP}  CWP:{CWP} mem_cy:{Mem_cy} comp_cy:{Comp_cy}   shapef:{shape_factor} base_ns:{self.baseline_ns} reps:{reps}")
-        kernel_ns = (totalCycles / self.arch.clock_rate_hz) * 1e9 + self.baseline_ns
+        kernel_ns = (totalCycles / self.arch.clock_rate_hz) * 1e9
         return float(kernel_ns)
 
     def _calc_blocks_per_sm(self, threads_per_block: int) -> int:   # 计算一个sm能有多少块

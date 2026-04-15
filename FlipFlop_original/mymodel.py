@@ -119,7 +119,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         print(f"blocks: {block_x}, {block_y}  \n\n\n")
         analyzer = PTXAnalyzer(ptx_str, ptxas_log, kernel_arch, block_x, block_y, {})
         analysis = analyzer.analyze()
-
+        print(analysis)
         time_model = HongKimExecutionTimeModel(
             kernel_arch, analysis, (batch_size * nhead, 1), (block_x, block_y))
         est_time_ns = time_model.estimate_time_ns()
@@ -151,7 +151,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         start = cuda.Event()
         end = cuda.Event()
 
-        kernel.prepare("PPqqqqPPqqPPqqPqqf")
+        kernel.prepare("PPqqqqPqqPqqPqqf")
         grid_dim = (int(batch_size * nhead), 1)
         block_dim = (int(block_x), int(block_y), 1)
 

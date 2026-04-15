@@ -359,6 +359,45 @@ class PTXAnalyzer:
                 cleaned_lines.append(stripped)
 
         return cleaned_lines,params
+
+    def find_loop_control_registers(self) -> List[Dict]:
+        loop_controls = []
+
+        # 遍历 CFG 找到所有的回边 (u -> v, 且 v 是 u 的祖先)
+        # 在你的代码中，这体现在 _build_cfg_and_identify_loops 识别出的 loop 结构
+        for u_idx, neighbors in self.cfg.items():
+            for v_idx in neighbors:
+                if v_idx <= u_idx:  # 识别为回边
+                    target_block = self.basic_blocks[u_idx]
+                    target_label = self.basic_blocks[v_idx][0].replace(':', '')
+
+                    # 在当前块寻找指向 target_label 的条件跳转
+                    for line in reversed(target_block):
+                        # 匹配模式: @%p1 bra $L__BB0_1;
+                        branch_match = re.search(r'@([\!%]\w+)\s+bra\s+' + re.escape(target_label), line)
+                        if branch_match:
+                            pred_reg = branch_match.group(1).replace('!', '')
+                            # 追溯定义该谓词的 setp 指令
+                            ctrl_regs = self._trace_predicate_in_block(target_block, pred_reg)
+
+                            loop_controls.append({
+                                "back_edge": f"Block {u_idx} -> {v_idx}",
+                                "header_label": target_label,
+                                "predicate": pred_reg,
+                                "control_registers": ctrl_regs,
+                                "branch_instr": line.strip()
+                            })
+                            break
+        return loop_controls
+
+    def _trace_predicate_in_block(self, block: List[str], pred_reg: str) -> List[str]:
+        pattern = re.compile(fr"setp\.\w+\.\w+\s+{re.escape(pred_reg)}\s*,\s*([\w%]+)\s*,\s*([\w%]+)")
+        for line in reversed(block):
+            if 'setp' in line and pred_reg in line:
+                match = pattern.search(line)
+                if match:
+                    return [match.group(1), match.group(2)]
+        return []
 # Example usage
 # ptx_analyzer = PTXAnalyzer(ptx_code, ptxas_log, arch, block_x, block_y, config)
 # analysis = ptx_analyzer.analyze()
