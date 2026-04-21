@@ -1,10 +1,8 @@
 import argparse
 
 import pycuda.driver as cuda
-from kernel_tuner.observers.nvml import NVMLObserver
-from pycuda.compiler import SourceModule, compile
+from pycuda.compiler import compile
 import numpy as np
-from typing import Tuple
 import re
 import os
 
@@ -15,24 +13,9 @@ import pycuda.autoinit
 from pycuda.compiler import SourceModule
 
 
-def compile_kernel(kernel_path: str, arch_options:list[str]):
+def compile_kernel(kernel_path: str, arch_options:list):
     with open(kernel_path, 'r') as f:
         source = f.read()
-
-    ctx = cuda.Context.get_current()
-    if ctx is None:
-        dev = cuda.Device(0)
-        ctx = dev.make_context()
-
-    ctx.push()
-    try:
-        # 这里的代码要比 try 多往后缩进一层
-        with open(kernel_path, 'r') as f:
-            source = f.read()
-        mod = SourceModule(source, options=arch_options, no_extern_c=True)
-        # ... 其他逻辑
-    finally:
-        ctx.pop()
 
     ptx_bytes = compile(source, target="ptx", options=arch_options, no_extern_c=True)
     ptx_str = ptx_bytes.decode()
@@ -97,7 +80,7 @@ def generate_block_combinations():
 def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, dim_per_head, iterations):
     arch_options = [
         "--ptxas-options=-v",
-        "-std=c++17",
+        "-std=c++14",
         "--compiler-options=-fPIC",
     ]
     kernel_dir = os.path.dirname(os.path.abspath(kernel_path))
