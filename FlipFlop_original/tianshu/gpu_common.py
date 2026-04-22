@@ -40,7 +40,17 @@ class GPUArchitecture:
 
         # 6. 校准相关
         self.calibration_file = calibration_file
-        # self.calibration_data = self._load_calibration(calibration_file)
+        self.calibration_data = self._load_calibration(calibration_file)
+        if NVML_ENABLED:
+            try:
+                nvmlInit()
+                self.nvml_handle = nvmlDeviceGetHandleByIndex(device_id)
+            except Exception as e:
+                print(f"[WARNING] NVML init failed: {e}")
+                self.nvml_handle = None
+        else:
+            self.nvml_handle = None
+
 
         print(f"[SUCCESS] 初始化设备: {self.name} | 架构: {self.arch_key}")
 
