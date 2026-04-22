@@ -597,93 +597,79 @@ class Calibrator:
         return cpti
 
     def _measure_streaming_bandwidth(self) -> float:
-        import torch
-        from torch.utils.cpp_extension import load_inline
-        import os
-        import statistics
-
         os.environ['TORCH_CUDA_ARCH_LIST'] = 'ivcore11'
         os.environ['TORCH_NVCC_FLAGS'] = '-x ivcore --cuda-gpu-arch=ivcore11'
 
-        def measure_peak_bandwidth():
-            # 1. C++ 部分：使用 long 接收指针地址，避免 pybind11 对 void* 的限制
-            cpp_src = """
-            #include <torch/extension.h>
-            extern "C" void launch_copy_float4(long in_addr, long out_addr, int n);
-            """
+        # 1. C++ 部分：使用 long 接收指针地址，避免 pybind11 对 void* 的限制
+        cpp_src = """
+        #include <torch/extension.h>
+        extern "C" void launch_copy_float4(long in_addr, long out_addr, int n);
+        """
 
-            # 2. CUDA 部分：将 long 强转为 float4*
-            kernel_src = """
-            #include <cuda_runtime.h>
+        # 2. CUDA 部分：将 long 强转为 float4*
+        kernel_src = """
+        #include <cuda_runtime.h>
 
-            __global__ void copy_float4_kernel(const float4* __restrict__ in, float4* __restrict__ out, int n) {
-                int tid = blockDim.x * blockIdx.x + threadIdx.x;
-                if(tid < n){
-                    out[tid] = in[tid];
-                }
+        __global__ void copy_float4_kernel(const float4* __restrict__ in, float4* __restrict__ out, int n) {
+            int tid = blockDim.x * blockIdx.x + threadIdx.x;
+            if(tid < n){
+                out[tid] = in[tid];
             }
+        }
 
-            extern "C" void launch_copy_float4(long in_addr, long out_addr, int n) {
-                int block_size = 256;
-                int grid_size = (n + block_size - 1) / block_size;
+        extern "C" void launch_copy_float4(long in_addr, long out_addr, int n) {
+            int block_size = 256;
+            int grid_size = (n + block_size - 1) / block_size;
 
-                // 显式强转
-                const float4* in = (const float4*)in_addr;
-                float4* out = (float4*)out_addr;
+            // 显式强转
+            const float4* in = (const float4*)in_addr;
+            float4* out = (float4*)out_addr;
 
-                copy_float4_kernel<<<grid_size, block_size>>>(in, out, n);
-            }
-            """
+            copy_float4_kernel<<<grid_size, block_size>>>(in, out, n);
+        }
+        """
 
-            module = load_inline(
-                name="bw_test_v4_final",
-                cpp_sources=cpp_src,
-                cuda_sources=kernel_src,
-                functions=["launch_copy_float4"],
-                extra_cuda_cflags=["-x ivcore", "-O3"],
-            )
+        module = load_inline(
+            name="bw_test_v4_final",
+            cpp_sources=cpp_src,
+            cuda_sources=kernel_src,
+            functions=["launch_copy_float4"],
+            extra_cuda_cflags=["-x ivcore", "-O3"],
+        )
 
-            # 4. 数据准备：512MB 总量 (128M 个 float)
-            N = 128 * 1024 * 1024
-            N_float4 = N // 4
+        # 4. 数据准备：512MB 总量 (128M 个 float)
+        N = 128 * 1024 * 1024
+        N_float4 = N // 4
 
-            d_a = torch.randn(N, dtype=torch.float32).cuda()
-            d_b = torch.empty(N, dtype=torch.float32).cuda()
+        d_a = torch.randn(N, dtype=torch.float32).cuda()
+        d_b = torch.empty(N, dtype=torch.float32).cuda()
 
-            # 5. 预热
-            for _ in range(10):
-                module.launch_copy_float4(d_a.data_ptr(), d_b.data_ptr(), N_float4)
+        # 5. 预热
+        for _ in range(10):
+            module.launch_copy_float4(d_a.data_ptr(), d_b.data_ptr(), N_float4)
+        torch.cuda.synchronize()
+
+        # 6. 正式测量
+        runs = 20
+        times_ms = []
+        for _ in range(runs):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+
+            start.record()
+            module.launch_copy_float4(d_a.data_ptr(), d_b.data_ptr(), N_float4)
+            end.record()
             torch.cuda.synchronize()
+            times_ms.append(start.elapsed_time(end))
 
-            # 6. 正式测量
-            runs = 20
-            times_ms = []
-            for _ in range(runs):
-                start = torch.cuda.Event(enable_timing=True)
-                end = torch.cuda.Event(enable_timing=True)
+        median_ms = statistics.median(times_ms)
 
-                start.record()
-                module.launch_copy_float4(d_a.data_ptr(), d_b.data_ptr(), N_float4)
-                end.record()
-                torch.cuda.synchronize()
-                times_ms.append(start.elapsed_time(end))
+        # 7. 带宽计算
+        # 读取 + 写入 = 2倍 N * 4 bytes
+        total_bytes = N * 4 * 2
+        bw_gbps = (total_bytes / 1e9) / (median_ms / 1e3)
 
-            median_ms = statistics.median(times_ms)
-
-            # 7. 带宽计算
-            # 读取 + 写入 = 2倍 N * 4 bytes
-            total_bytes = N * 4 * 2
-            bw_gbps = (total_bytes / 1e9) / (median_ms / 1e3)
-
-            return bw_gbps
-
-        if __name__ == "__main__":
-            os.system("rm -rf ~/.cache/torch_extensions/py310_cu102/bw_test_v4_final")
-            try:
-                gbps = measure_peak_bandwidth()
-                print(f"BI-V150 Peak Bandwidth: {gbps:.2f} GB/s")
-            except Exception as e:
-                print(f"Measurement failed: {e}")
+        return bw_gbps
 
 
 def main():

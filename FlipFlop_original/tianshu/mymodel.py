@@ -69,7 +69,6 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
     block_combos = generate_block_combinations()
     bench_results = []
     mod, ptx_str, ptxas_log, kname = compile_kernel(kernel_path,arch_options)
-    kernel = mod.get_function(kname)
 
     for block_x, block_y in block_combos:
         print(f"blocks: {block_x}, {block_y}  \n\n\n")
