@@ -50,10 +50,7 @@ class Calibrator:
         dep_del_coal_s    = (lat_coal_ns   * 1e-9) / 16.0
         dep_del_uncoal_s  = (lat_uncoal_ns * 1e-9) /  8.0
 
-        # Power measurements
-        idle_pw = self._repeat_and_average(self._measure_idle_power)
-
-        occupancy_shape_param = self._measure_shape_occupancy_factor(idle_pw)
+        occupancy_shape_param = self._measure_shape_occupancy_factor()
 
         new_info = {
             self.arch_key: {

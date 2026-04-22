@@ -1,71 +1,44 @@
 import argparse
 
-import pycuda.driver as cuda
-from pycuda.compiler import compile
 import numpy as np
 import re
 import os
+import subprocess
 
 from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
-import pycuda.autoinit
-from pycuda.compiler import SourceModule
 
 
-def compile_kernel(kernel_path: str, arch_options:list):
-    with open(kernel_path, 'r') as f:
-        source = f.read()
+def compile_kernel(kernel_path: str, arch_options: list):
+    # 1. 确定输出路径
+    ptx_path = kernel_path + ".ptx"
 
-    ptx_bytes = compile(source, target="ptx", options=arch_options, no_extern_c=True)
-    ptx_str = ptx_bytes.decode()
-    m = re.search(r"\.entry\s+(\w+)", ptx_str)
-    if not m:
-        raise RuntimeError("No .entry <kernel> found in PTX!")
-    with open(kernel_path+".ptx",'w') as ff:
-        ff.write(ptx_str)
-    
-    mod = SourceModule(source, options=arch_options, no_extern_c=True)
-    kernel_name = m.group(1)
-    compile_log = getattr(mod, "_compile_log", "")
-    
-    return mod, ptx_str, compile_log, kernel_name
+    # 2. 构建 ixcc 编译命令
+    cmd = ["ixcc", "--ptx", "-v"] + arch_options + [kernel_path, "-o", ptx_path]
 
-def prepare_add_rmsnorm_args(batch_size, dim, nhead):
-    a = np.random.randn(batch_size, nhead, dim).astype(np.float32)
-    b = np.random.randn(batch_size, nhead, dim).astype(np.float32)
-    weight = np.random.randn(dim).astype(np.float32)
+    try:
+        # 捕获编译器输出以获取 ptxas_log (compile_log)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = process.communicate()
+        compile_log = stdout + stderr
 
-    # 2. 准备输出张量占位符
-    y = np.zeros_like(a)
-    residual_out = np.zeros_like(a)
+        if process.returncode != 0:
+            raise RuntimeError(f"ixcc 编译失败: {stderr}")
 
-    # 3. 计算步长 (Strides) - 对应源码中的 _info.a_strides 等
-    # 假设内存是连续排布的 (Contiguous)
-    stride_batch = np.int64(nhead * dim)
-    stride_nhead = np.int64(dim)
+        with open(ptx_path, 'r') as f:
+            ptx_str = f.read()
 
-    # 4. 配置参数
-    epsilon = np.float32(1e-5)
+        m = re.search(r"\.entry\s+(\w+)", ptx_str)
+        kernel_name = m.group(1) if m else "unknown_kernel"
 
-    return [
-        y,  # 输出结果
-        residual_out,  # 相加后的残差输出
-        stride_batch,  # stride_y_batch
-        stride_nhead,  # stride_y_nhead
-        stride_batch,  # stride_residual_out_batch
-        stride_nhead,  # stride_residual_out_nhead
-        a,  # 输入 a
-        stride_batch,  # stride_a_batch
-        stride_nhead,  # stride_a_nhead
-        b,  # 输入 b
-        stride_batch,  # stride_b_batch
-        stride_nhead,  # stride_b_nhead
-        weight,  # 权重 w
-        np.int32(nhead),
-        np.int32(dim),
-        epsilon
-    ]
+        # mod 返回 None，因为我们后续用 PyTorch 运行，不在这里加载
+        return None, ptx_str, compile_log, kernel_name
+
+    except Exception as e:
+        print(f"编译过程中出现错误: {e}")
+        raise
+
 
 def generate_block_combinations():
     """Generate all valid block size combinations based on restrictions"""
@@ -110,22 +83,19 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         batch_size = 4
         nhead = 32
         dim = 128
-
         a = np.random.randn(batch_size, nhead, dim).astype(np.float32)
         b = np.random.randn(batch_size, nhead, dim).astype(np.float32)
         w = np.random.randn(dim).astype(np.float32)
         y = np.zeros_like(a)
         residual_out = np.zeros_like(a)
-        stride_batch = np.int64(nhead * dim)
-        stride_nhead = np.int64(dim)
-        epsilon = np.float32(1e-5)
-
         a_gpu = cuda.mem_alloc(a.nbytes)
         b_gpu = cuda.mem_alloc(b.nbytes)
         w_gpu = cuda.mem_alloc(w.nbytes)
-
         y_gpu = cuda.mem_alloc(y.nbytes)
         res_gpu = cuda.mem_alloc(residual_out.nbytes)
+        stride_batch = np.int64(nhead * dim)
+        stride_nhead = np.int64(dim)
+        epsilon = np.float32(1e-5)
 
         cuda.memcpy_htod(a_gpu, a)
         cuda.memcpy_htod(b_gpu, b)
