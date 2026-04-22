@@ -54,8 +54,8 @@ class GPUArchitecture:
             'MEMORY_CLOCK_RATE': 1600*1000,  # in kHz
             'MAX_THREADS_PER_MULTIPROCESSOR': 2048,
             'MAX_REGISTERS_PER_MULTIPROCESSOR': 65536,
-            'MAX_SHARED_MEMORY_PER_MULTIPROCESSOR': prop.shared_mem_per_block,
-            'MAX_THREADS_PER_BLOCK': prop.max_threads_per_block,
+            'MAX_SHARED_MEMORY_PER_MULTIPROCESSOR': 65536,
+            'MAX_THREADS_PER_BLOCK': 1024,
             'WARP_SIZE': 32,
             'MAX_BLOCKS_PER_MULTIPROCESSOR': 32  # assume 32 if not provided
         }
