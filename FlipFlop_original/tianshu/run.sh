@@ -18,13 +18,7 @@ mkdir -p "$(dirname "$CSV_OUT")"
 
 
 # Run the Python script
-ncu \
-  --launch-count 10 \
-  --kernel-name-base demangled \
-  --metrics smsp__warps_active.avg,smsp__warps_eligible.avg,smsp__warp_issue_stalled_memory_dependency.avg \
-  --set full \
-  --target-processes all \
-  python3 -m mymodel \
+python3 -m mymodel \
     --kernel_file "${KERNEL_FILE}" \
     --batch_size 4 \
     --seq_lens 2048 \
