@@ -19,33 +19,36 @@ def get_launch_func(kernel_source_path):
 
     # 定义 C++ 中间层代码：它接收指针并启动内核
     cpp_source = """
-    void launch_add_rmsnorm(
-        long y_ptr, long res_ptr, 
-        long s_b1, long s_n1, long s_b2, long s_n2,
-        long a_ptr, long s_ba, long s_na,
-        long b_ptr, long s_bb, long s_nb,
-        long w_ptr, long nhead, long dim, float eps,
-        int grid_x, int block_x) {
+        #include <cuda_runtime.h>
 
-        // 将 long 类型的地址转回物理指针
-        float* y = (float*)y_ptr;
-        float* res = (float*)res_ptr;
-        float* a = (float*)a_ptr;
-        float* b = (float*)b_ptr;
-        float* w = (float*)w_ptr;
+        // 声明内核，让包装器知道它的存在
+        template <unsigned int BLOCK_SIZE, typename Tcompute, typename Tdata, typename Tweight>
+        __global__ void add_rmsnormKernel(
+            Tdata *y, Tdata *residual_out,
+            long s_y_b, long s_y_n, long s_r_b, long s_r_n,
+            const Tdata *a, long s_a_b, long s_a_n,
+            const Tdata *b, long s_b_b, long s_b_n,
+            const Tweight *w, size_t nhead, size_t dim, float epsilon);
 
-        // 3. 调用内核函数
-        // 注意：根据 add_rms_norm_nvidia.cu 第 11 行，
-        // 这里需要传递模板参数 <BLOCK_SIZE, Tcompute, Tdata, Tweight>
-        // 为了方便测试，我们这里假设 T=float，且 BLOCK_SIZE 匹配传入的 block_x
-        // 实际上在 BI-V150 上通常需要根据 block_x 动态派发，
-        // 这里先展示一个针对当前 block_x 的调用方式（如果 block_x 是常数或预定义的）：
-        
-        // 简化的调用方式（确保内核名匹配）：
-        add_rmsnormKernel<1024, float, float, float><<<grid, block>>>(
-            y, res, s_b1, s_n1, s_b2, s_n2, a, s_ba, s_na, b, s_bb, s_nb, w, nhead, dim, eps
-        );
-    """
+        void launch_add_rmsnorm(
+            long y_ptr, long res_ptr, 
+            long s_b1, long s_n1, long s_b2, long s_n2,
+            long a_ptr, long s_ba, long s_na,
+            long b_ptr, long s_bb, long s_nb,
+            long w_ptr, long nhead, long dim, float eps,
+            int grid_x, int block_x) {
+
+            // 这里的内核调用必须指定模板参数，BI-V150 运行 fp32 
+            // 这里的 1024 只是示例，建议改为匹配 block_x 的逻辑
+            add_rmsnormKernel<1024, float, float, float><<<grid_x, block_x>>>(
+                (float*)y_ptr, (float*)res_ptr,
+                s_b1, s_n1, s_b2, s_n2,
+                (float*)a_ptr, s_ba, s_na,
+                (float*)b_ptr, s_bb, s_nb,
+                (float*)w_ptr, nhead, dim, eps
+            );
+        }
+        """
 
     # 动态编译并加载
     # extra_cuda_cflags=["-x", "ivcore"] 是天数智芯 ixcc 的关键参数
@@ -153,10 +156,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
             kernel_arch, analysis, (batch_size * nhead, 1), (block_x, block_y))
         est_time_ns = time_model.estimate_time_ns()
 
-        batch_size = 4
-        nhead = 32
-        dim = 128
-        data = prepare_data_torch(batch_size, dim, nhead)
+        data = prepare_data_torch(batch_size, dim_per_head, nhead)
         grid_size = int(batch_size * nhead)
 
         for _ in range(50):

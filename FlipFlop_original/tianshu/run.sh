@@ -23,7 +23,7 @@ mkdir -p "$(dirname "$CSV_OUT")"
 
 
 # Run the Python script
-python3 -m mymodel \
+python3 mymodel \
     --kernel_file "${KERNEL_FILE}" \
     --batch_size 4 \
     --seq_lens 2048 \
