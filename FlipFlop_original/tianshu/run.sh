@@ -9,7 +9,7 @@ export CUDA_HOME=/usr/local/corex-4.3.0
 # 3. 保持原有的 PYTHONPATH
 export PYTHONPATH=$(pwd)/../../..
 
-KERNEL_FILE="/home/anqi/infini/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu"
+KERNEL_FILE="/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu"
 BATCH_SIZE=4
 SEQ_LENS="512"
 NHEAD=16
