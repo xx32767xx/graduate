@@ -247,7 +247,7 @@ class Calibrator:
         median_ms = statistics.median(times_ms)
         return median_ms * 1e6
 
-    def _measure_global_latency(uncoalesced) -> float:
+    def _measure_global_latency(self,uncoalesced) -> float:
         cpp_src = """
         extern "C" void launch_global_latency(float* buf, int N, int chaseIters, int stride, float* d_out);
         """
