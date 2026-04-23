@@ -1,75 +1,86 @@
-import pycuda.autoinit
-import pycuda.driver as cuda
-from pycuda.compiler import SourceModule
+import torch
+from torch.utils.cpp_extension import load_inline
 import numpy as np
 import time
 
-# CUDA 核函数：简单的二维矩阵元素缩放
-# 保持总计算量不变，通过调整 blockDim.x 和 blockDim.y 来验证形状影响
-mod = SourceModule("""
+# 1. 定义 CUDA 源代码 (保持逻辑与原 2d_scale.py 一致)
+cuda_source = """
 __global__ void shape_test_kernel(float *dest, float *src, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height) {
         int idx = y * width + x;
-        // 增加一点计算量，防止算子执行太快
         float val = src[idx];
+        // 增加计算量以验证形状影响
         for(int i = 0; i < 10; i++) {
             val = val * 1.00001f + 0.00001f;
         }
         dest[idx] = val;
     }
 }
-""")
 
-shape_test_kernel = mod.get_function("shape_test_kernel")
+void launch_shape_test(torch::Tensor dest, torch::Tensor src, int width, int height, int gx, int gy, int bx, int by) {
+    dim3 grid(gx, gy);
+    dim3 block(bx, by);
+
+    shape_test_kernel<<<grid, block>>>(
+        dest.data_ptr<float>(),
+        src.data_ptr<float>(),
+        width,
+        height
+    );
+}
+"""
+
+cpp_source = "void launch_shape_test(torch::Tensor dest, torch::Tensor src, int width, int height, int gx, int gy, int bx, int by);"
+
+# 2. 编译并加载内核 (针对天数智芯配置)
+# 使用你在 run.sh 中确认的路径
+custom_kernel = load_inline(
+    name='shape_test_extension',
+    cpp_sources=[cpp_source],
+    cuda_sources=[cuda_source],
+    functions=['launch_shape_test'],
+    extra_cuda_cflags=["-x", "ivcore", "-I/usr/local/corex-4.3.0/include"]
+)
+
 
 def profile_shape(bx, by, width=4096, height=4096):
-    # 准备数据
-    a = np.random.randn(width, height).astype(np.float32)
-    a_gpu = cuda.mem_alloc(a.nbytes)
-    dest_gpu = cuda.mem_alloc(a.nbytes)
-    cuda.memcpy_htod(a_gpu, a)
+    # 3. 准备 PyTorch 张量
+    a_gpu = torch.randn(width, height, device='cuda', dtype=torch.float32)
+    dest_gpu = torch.empty_like(a_gpu)
 
     # 计算 Grid 尺寸
     gx = (width + bx - 1) // bx
     gy = (height + by - 1) // by
 
-    # 测量时间
-    start = cuda.Event()
-    end = cuda.Event()
+    # 4. 测量时间
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
 
     # Warmup
     for _ in range(3):
-        shape_test_kernel(dest_gpu, a_gpu, np.int32(width), np.int32(height),
-                          block=(bx, by, 1), grid=(gx, gy, 1))
+        custom_kernel.launch_shape_test(dest_gpu, a_gpu, width, height, gx, gy, bx, by)
 
-    start.record()
-    for _ in range(10):
-        shape_test_kernel(dest_gpu, a_gpu, np.int32(width), np.int32(height),
-                          block=(bx, by, 1), grid=(gx, gy, 1))
-    end.record()
-    end.synchronize()
+    torch.cuda.synchronize()
+    start_event.record()
 
-    msec = start.time_till(end) / 10.0
-    print(f"Block Shape: ({bx:4d}, {by:4d}) | Avg Time: {msec:.4f} ms")
-    return msec
+    iterations = 10
+    for _ in range(iterations):
+        custom_kernel.launch_shape_test(dest_gpu, a_gpu, width, height, gx, gy, bx, by)
 
-# 验证方案：保持 bx * by = 1024 (1个Warp到32个Warp的规模)
-test_shapes = [
-    (1, 1024),   # 极端垂直：最差的访存合并
-    (2, 512),
-    (4, 256),
-    (8, 128),
-    (32, 32),    # 对称：通常是平衡点
-    (128, 8),
-    (512, 2),
-    (1024, 1)    # 极端水平：理论上最好的访存合并
-]
+    end_event.record()
+    torch.cuda.synchronize()
 
-print("Starting Shape Impact Validation...")
-results = []
-for bx, by in test_shapes:
-    t = profile_shape(bx, by)
-    results.append(t)
+    # 单位：毫秒
+    avg_time = start_event.elapsed_time(end_event) / iterations
+    return avg_time
+
+
+if __name__ == "__main__":
+    # 示例运行
+    block_configs = [(16, 16), (32, 8), (8, 32)]
+    for bx, by in block_configs:
+        t = profile_shape(bx, by)
+        print(f"Block({bx}, {by}) - Avg Time: {t:.4f} ms")
