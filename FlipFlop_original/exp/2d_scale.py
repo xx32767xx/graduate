@@ -80,7 +80,7 @@ def profile_shape(bx, by, width=4096, height=4096):
 
 if __name__ == "__main__":
     # 示例运行
-    block_configs = [(16, 16), (32, 8), (8, 32)]
+    block_configs = [(2,512),(4,256),(8,128),(16, 64), (32, 32), (64, 16),(128,8),(256,4),(512,2)]
     for bx, by in block_configs:
         t = profile_shape(bx, by)
         print(f"Block({bx}, {by}) - Avg Time: {t:.4f} ms")
