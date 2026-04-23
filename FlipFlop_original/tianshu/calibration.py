@@ -322,19 +322,14 @@ class Calibrator:
         cpp_src = """
             extern "C" void launch_partial_lat(float* buf, int N, int stride, int chaseIters, float* d_out);
             """
-
-        # 3. CUDA 内核实现
         kernel_src = """
             #include <cuda_runtime.h>
-
             __global__ void partial_lat_kernel(float *buf, int N, int stride, int chaseIters, float* out) {
-                // 仅使用一个线程进行指针追逐以测量延迟
                 if(threadIdx.x == 0 && blockIdx.x == 0) {
                     int pos = 0;
                     float val = 0.0f;
                     for(int i = 0; i < chaseIters; i++) {
                         float raw_val = buf[pos];
-                        // 位解释转换
                         pos = *(int*)&raw_val;
                         pos = pos % N;
                         val += (float)pos;
@@ -348,7 +343,6 @@ class Calibrator:
             }
             """
 
-        # 4. 编译扩展 (每次 offset 不同可以共用同一个 module，但为了安全我们使用固定 name)
         module = load_inline(
             name="partial_coalescing_mod",
             cpp_sources=cpp_src,
@@ -357,13 +351,10 @@ class Calibrator:
             extra_cuda_cflags=["-x ivcore"],
             verbose=False,
         )
-
-        # 5. 数据准备
         N = 128 * 1024
         chaseIters = 200000
-        strideVal = offset // 4  # 每个 float 占 4 字节
+        strideVal = offset // 4
 
-        # 构造指针追逐链
         arr = np.zeros(N, dtype=np.float32)
         curr_pos = 0
         for i in range(N):
@@ -374,21 +365,15 @@ class Calibrator:
         d_buf = torch.from_numpy(arr).cuda()
         d_out = torch.zeros(1, dtype=torch.float32).cuda()
 
-        # 6. 测量
-        # 预热
         module.launch_partial_lat(d_buf.data_ptr(), N, strideVal, chaseIters, d_out.data_ptr())
         torch.cuda.synchronize()
-
         start_ev = torch.cuda.Event(enable_timing=True)
         end_ev = torch.cuda.Event(enable_timing=True)
-
         start_ev.record()
         module.launch_partial_lat(d_buf.data_ptr(), N, strideVal, chaseIters, d_out.data_ptr())
         end_ev.record()
         torch.cuda.synchronize()
-
         ms = start_ev.elapsed_time(end_ev)
-        # 计算单次加载的纳秒数
         per_load_ns = (ms * 1e6) / chaseIters
         return float(per_load_ns)
 

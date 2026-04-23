@@ -5,7 +5,7 @@ import re
 import os
 import subprocess
 
-from gpu_common import GPUArchitecture
+# from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
 
@@ -149,12 +149,14 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
 
     for block_x, block_y in block_combos:
         print(f"blocks: {block_x}, {block_y}  \n\n\n")
+        '''
         analyzer = PTXAnalyzer(ptx_str, ptxas_log, kernel_arch, block_x, block_y, {})
         analysis = analyzer.analyze()
         print(analysis)
         time_model = HongKimExecutionTimeModel(
             kernel_arch, analysis, (batch_size * nhead, 1), (block_x, block_y))
         est_time_ns = time_model.estimate_time_ns()
+        '''
 
         data = prepare_data_torch(batch_size, dim_per_head, nhead)
         grid_size = int(batch_size * nhead)
@@ -171,7 +173,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         end.record()
         torch.cuda.synchronize()
         time_ms = start.elapsed_time(end) / 50 * 1e6
-        print(f"Avg time: {time_ms:.3f} ns   est_time_ns:{est_time_ns:.3f} ns\n\n\n")
+        print(f"Avg time: {time_ms:.3f} ns \n\n\n")
 
     return bench_results
 
@@ -194,7 +196,8 @@ if __name__=="__main__":
     parser.add_argument("--iterations", type=int, default=5)
     args = parser.parse_args()
 
-    arch = GPUArchitecture( device_id = 0, calibration_file=args.calib)
+    # arch = GPUArchitecture( device_id = 0, calibration_file=args.calib)
+    arch = []
     seq_lens = [int(s) for s in args.seq_lens.split(",")] if args.seq_lens else [128]
 
 
