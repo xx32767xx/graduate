@@ -23,37 +23,36 @@ def get_launch_func(kernel_source_path):
         cuda_source = f.read()
 
     # 定义 C++ 中间层代码：它接收指针并启动内核
-    cpp_source = """
-        #include <cuda_runtime.h>
+    cpp_source = '''
+        extern "C" void launch_add_rmsnorm(
+        long y_ptr, long res_ptr, 
+        long s_b1, long s_n1, long s_b2, long s_n2,
+        long a_ptr, long s_ba, long s_na,
+        long b_ptr, long s_bb, long s_nb,
+        long w_ptr, long nhead, long dim, float eps,
+        int grid_x, int block_x)
+    {
+    add_rmsnormKernel<1024, float, float, float>
+    <<<grid_x, block_x>>>(
+        (float*)y_ptr,
+        (float*)res_ptr,
 
-        // 声明内核，让包装器知道它的存在
-        template <unsigned int BLOCK_SIZE, typename Tcompute, typename Tdata, typename Tweight>
-        __global__ void add_rmsnormKernel(
-            Tdata *y, Tdata *residual_out,
-            long s_y_b, long s_y_n, long s_r_b, long s_r_n,
-            const Tdata *a, long s_a_b, long s_a_n,
-            const Tdata *b, long s_b_b, long s_b_n,
-            const Tweight *w, size_t nhead, size_t dim, float epsilon);
+        s_b1, s_n1,
+        s_b2, s_n2,
 
-        void launch_add_rmsnorm(
-            long y_ptr, long res_ptr, 
-            long s_b1, long s_n1, long s_b2, long s_n2,
-            long a_ptr, long s_ba, long s_na,
-            long b_ptr, long s_bb, long s_nb,
-            long w_ptr, long nhead, long dim, float eps,
-            int grid_x, int block_x) {
+        (float*)a_ptr,
+        s_ba, s_na,
 
-            // 这里的内核调用必须指定模板参数，BI-V150 运行 fp32 
-            // 这里的 1024 只是示例，建议改为匹配 block_x 的逻辑
-            add_rmsnormKernel<1024, float, float, float><<<grid_x, block_x>>>(
-                (float*)y_ptr, (float*)res_ptr,
-                s_b1, s_n1, s_b2, s_n2,
-                (float*)a_ptr, s_ba, s_na,
-                (float*)b_ptr, s_bb, s_nb,
-                (float*)w_ptr, nhead, dim, eps
-            );
-        }
-        """
+        (float*)b_ptr,
+        s_bb, s_nb,
+
+        (float*)w_ptr,
+        nhead,
+        dim,
+        eps
+        );
+    }
+    '''
 
     # 动态编译并加载
     # extra_cuda_cflags=["-x", "ivcore"] 是天数智芯 ixcc 的关键参数
