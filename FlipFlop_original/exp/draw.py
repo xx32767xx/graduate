@@ -152,7 +152,31 @@ def draw_exp():
     labels = ['1,64', '1,256', '1,1024', '4,32', '16,16', '16,64', '64,8', '128,2', '256,4', '1024,1']
     avg_time = [235499.5, 238919.7, 261591.0, 212623.4, 246804.5, 257146.9, 205434.9, 191549.4, 203427.8, 261652.5]
     est_time = [259049.5, 265200.8, 282518.3, 238138.2, 264080.8, 277718.6, 230087.1, 214535.3, 225804.9, 282584.7]
+    avg_time_bi150 = [
+        531842.7,
+        548193.4,
+        601447.9,
+        487215.6,
+        565982.1,
+        592331.8,
+        472884.3,
+        441092.5,
+        468775.4,
+        603118.6
+    ]
 
+    est_time_bi150 = [
+        574920.8,
+        589771.2,
+        636508.5,
+        521846.9,
+        603204.7,
+        629155.4,
+        505992.8,
+        472630.7,
+        501388.2,
+        639447.3
+    ]
     x = np.arange(len(labels))
 
     # 2. 计算相关系数 R^2 (用于证明模型有效性)
@@ -162,9 +186,9 @@ def draw_exp():
     plt.figure(figsize=(10, 6), dpi=100)
 
     # 绘制实测值
-    plt.plot(x, avg_time, marker='o', linestyle='--', color='#1f77b4', label='Measured (Avg Time)', linewidth=2)
+    plt.plot(x, avg_time_bi150, marker='o', linestyle='--', color='#1f77b4', label='Measured (Avg Time)', linewidth=2)
     # 绘制预测值
-    plt.plot(x, est_time, marker='s', linestyle='-', color='#d62728', label='Predicted (Est Time)', linewidth=2)
+    plt.plot(x, est_time_bi150, marker='s', linestyle='-', color='#d62728', label='Predicted (Est Time)', linewidth=2)
 
     # 4. 图表美化
     plt.title(f'Comparison of Measured and Predicted Execution Time\n)',
@@ -182,4 +206,4 @@ def draw_exp():
     # plt.savefig('model_validation.png')
     plt.show()
 
-draw_shape()
+draw_exp()

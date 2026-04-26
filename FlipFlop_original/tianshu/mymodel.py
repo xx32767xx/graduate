@@ -3,14 +3,19 @@ import argparse
 import numpy as np
 import re
 import os
+
+os.environ['TORCH_CUDA_ARCH_LIST'] = 'ivcore11'
+os.environ['TORCH_NVCC_FLAGS'] = '-x ivcore --cuda-gpu-arch=ivcore11'
+
 import subprocess
+import torch
+from torch.utils.cpp_extension import load_inline
+
 
 # from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
 
-import torch
-from torch.utils.cpp_extension import load_inline
 
 def get_launch_func(kernel_source_path):
     # 读取你原来的 .cu 文件内容
@@ -57,8 +62,11 @@ def get_launch_func(kernel_source_path):
         cpp_sources=[cpp_source],
         cuda_sources=[cuda_source],
         functions=['launch_add_rmsnorm'],
-        extra_cuda_cflags=["-x", "ivcore", "-I/usr/local/corex/include"]
-    )
+        extra_cuda_cflags=[
+            "-x ivcore",
+            "--cuda-gpu-arch=ivcore11",
+            "-I/usr/local/corex/include"
+        ]    )
 
     return custom_module.launch_add_rmsnorm
 
