@@ -18,6 +18,12 @@ from time_model import HongKimExecutionTimeModel
 
 
 def get_launch_func(kernel_source_path):
+    import subprocess
+    result = subprocess.run(['nvcc', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print("--- Python Subprocess NVCC Check ---")
+    print(result.stdout)
+    print("------------------------------------")
+
     # 读取你原来的 .cu 文件内容
     with open(kernel_source_path, 'r') as f:
         original_cuda = f.read()
