@@ -33,81 +33,80 @@ print(f"[INFO] Using temp build directory: {_CALIB_BUILD_DIR}")
 
 
 def get_launch_func(kernel_source_path):
-    import os, re
-
-    with open(kernel_source_path, 'r') as f:
-        original_cuda = f.read()
+    import subprocess, os, re
 
     kernel_dir = os.path.dirname(os.path.abspath(kernel_source_path))
+    # kernel_dir = .../add_rms_norm/nvidia/
+    cuda_kernel_path = os.path.join(os.path.dirname(kernel_dir), "cuda", "kernel.cuh")
+    # cuda_kernel_path = .../add_rms_norm/cuda/kernel.cuh
 
-    def find_all_includes(source_code, base_dir):
-        include_pattern = re.compile(r'#include\s+"([^"]+)"')
-        include_dirs = set()
-        include_dirs.add(base_dir)
-        includes = include_pattern.findall(source_code)
-        for inc_path in includes:
-            full_path = os.path.normpath(os.path.join(base_dir, inc_path))
-            inc_dir = os.path.dirname(full_path)
-            if os.path.exists(inc_dir):
-                include_dirs.add(inc_dir)
-            if os.path.exists(full_path):
-                try:
-                    with open(full_path, 'r') as f:
-                        sub_source = f.read()
-                    include_dirs.update(find_all_includes(sub_source, inc_dir))
-                except:
-                    pass
-        return include_dirs
+    # 直接 include cuda/kernel.cuh，只实例化 float 版本
+    cuda_source = f'''
+    #include <cuda_runtime.h>
+    #include <cub/block/block_reduce.cuh>
+    #include "{cuda_kernel_path}"
 
-    include_dirs = find_all_includes(original_cuda, kernel_dir)
+    // 只实例化 float 版本（避开 half/bf16 兼容问题）
+    template __device__ void add_rmsnormBlock<1024, float, float, float>(
+        float *__restrict__ y,
+        float *__restrict__ residual_out,
+        ptrdiff_t, ptrdiff_t, ptrdiff_t, ptrdiff_t,
+        const float *__restrict__ a,
+        ptrdiff_t, ptrdiff_t,
+        const float *__restrict__ b,
+        ptrdiff_t, ptrdiff_t,
+        const float *__restrict__ w,
+        size_t, size_t, float);
 
-    # ============ 关键：添加 InfiniCore/include ============
-    infini_project_root = kernel_dir
-    for _ in range(5):
-        infini_project_root = os.path.dirname(infini_project_root)
+    __global__ void add_rmsnorm_float_kernel(
+        float *__restrict__ y,
+        float *__restrict__ residual_out,
+        ptrdiff_t stride_y_batch,
+        ptrdiff_t stride_y_nhead,
+        ptrdiff_t stride_residual_out_batch,
+        ptrdiff_t stride_residual_out_nhead,
+        const float *__restrict__ a,
+        ptrdiff_t stride_a_batch,
+        ptrdiff_t stride_a_nhead,
+        const float *__restrict__ b,
+        ptrdiff_t stride_b_batch,
+        ptrdiff_t stride_b_nhead,
+        const float *__restrict__ w,
+        size_t nhead,
+        size_t dim,
+        float epsilon) {{
 
-    include_dir = os.path.join(infini_project_root, "include")
-    if os.path.exists(include_dir):
-        include_dirs.add(include_dir)
-        print(f"[DEBUG] Added: {include_dir}")
-    # =====================================================
+        add_rmsnormBlock<1024, float, float, float>(
+            y, residual_out,
+            stride_y_batch, stride_y_nhead,
+            stride_residual_out_batch, stride_residual_out_nhead,
+            a, stride_a_batch, stride_a_nhead,
+            b, stride_b_batch, stride_b_nhead,
+            w, nhead, dim, epsilon);
+    }}
 
-    system_paths = [
-        "/usr/local/corex/include",
-        "/usr/local/corex-4.3.0/include",
-        "/usr/local/cuda/include",
-        "/usr/local/cuda/include/cub",
-    ]
-    include_dirs.update(p for p in system_paths if os.path.exists(p))
-
-    include_flags = []
-    for d in sorted(include_dirs):
-        if os.path.exists(d):
-            include_flags.extend(["-I", d])
-
-    cuda_source = original_cuda + r'''
     extern "C" void launch_add_rmsnorm(
-        long y_ptr, long res_ptr, 
+        long y_ptr, long res_ptr,
         long s_b1, long s_n1, long s_b2, long s_n2,
         long a_ptr, long s_ba, long s_na,
         long b_ptr, long s_bb, long s_nb,
         long w_ptr, long nhead, long dim, float eps,
         int grid_x, int block_x)
-    {
-        add_rmsnormKernel<1024, float, float, float>
-        <<<grid_x, block_x>>>(
+    {{
+        add_rmsnorm_float_kernel<<<grid_x, block_x>>>(
             (float*)y_ptr, (float*)res_ptr,
             s_b1, s_n1, s_b2, s_n2,
             (float*)a_ptr, s_ba, s_na,
             (float*)b_ptr, s_bb, s_nb,
-            (float*)w_ptr, nhead, dim, eps
+            (float*)w_ptr,
+            nhead, dim, eps
         );
-    }
+    }}
     '''
 
     cpp_source = """
     extern "C" void launch_add_rmsnorm(
-        long y_ptr, long res_ptr, 
+        long y_ptr, long res_ptr,
         long s_b1, long s_n1, long s_b2, long s_n2,
         long a_ptr, long s_ba, long s_na,
         long b_ptr, long s_bb, long s_nb,
@@ -115,21 +114,26 @@ def get_launch_func(kernel_source_path):
         int grid_x, int block_x);
     """
 
+    # 包含路径：cuda/ 目录 + cub 所在目录
+    cuda_dir = os.path.dirname(cuda_kernel_path)
+    cub_include = "/usr/local/corex-4.3.0/include/cub"
+
     custom_module = load_inline(
-        name='bi_v150_launcher_v3',  # 换名字避免缓存
+        name='rmsnorm_float_clean',
         cpp_sources=[cpp_source],
         cuda_sources=[cuda_source],
         functions=['launch_add_rmsnorm'],
         extra_cuda_cflags=[
-                              "-x", "ivcore",
-                              "--cuda-gpu-arch=ivcore11",
-                              "-O3"
-                          ] + include_flags,
+            "-x", "ivcore",
+            "--cuda-gpu-arch=ivcore11",
+            "-O3",
+            "-I", cuda_dir,
+            "-I", cub_include,
+        ],
         verbose=True
     )
 
     return custom_module.launch_add_rmsnorm
-
 
 def compile_kernel(kernel_path: str, arch_options: list):
     # 1. 确定输出路径

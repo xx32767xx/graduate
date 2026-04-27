@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-KERNEL_FILE="/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu"
+KERNEL_FILE="/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/cuda/add_rms_norm_nvidia.cu"
 BATCH_SIZE=4
 SEQ_LENS="512"
 NHEAD=16
