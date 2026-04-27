@@ -66,15 +66,17 @@ def get_launch_func(kernel_source_path):
     # 动态编译并加载
     # extra_cuda_cflags=["-x", "ivcore"] 是天数智芯 ixcc 的关键参数
     custom_module = load_inline(
-        name='bi_v150_launcher',
+        name='bi_v150_launcher_v2',  # 更换名字强制重新触发编译
         cpp_sources=[cpp_source],
         cuda_sources=[cuda_source],
         functions=['launch_add_rmsnorm'],
         extra_cuda_cflags=[
-            "-x ivcore",
-            "--cuda-gpu-arch=ivcore11",
-            "-I/usr/local/corex/include"
-        ]    )
+            "-x", "ivcore",  # 必须拆分为两个元素
+            "--cuda-gpu-arch=ivcore11",  # 确保没有多余空格
+            "-I/usr/local/corex/include",
+            "-O3"
+        ]
+    )
 
     return custom_module.launch_add_rmsnorm
 

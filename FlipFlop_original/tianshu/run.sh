@@ -18,12 +18,13 @@ CSV_OUT="rq3_data/full_energy_results.csv"
 ITERATIONS=5
 CALIB_FILE="calibration.json"
 
-# Create output directory
-mkdir -p "$(dirname "$CSV_OUT")"
 
+# 添加这一行用于调试，确保输出的是 /usr/local/corex-4.3.0/bin/nvcc
+echo "Using nvcc from: $(which nvcc)"
+nvcc --version
 
-# Run the Python script
-python3 mymodel.py \
+# 运行 Python 时，建议加上 -u 参数强制刷新日志输出
+python3 -u mymodel.py \
     --kernel_file "${KERNEL_FILE}" \
     --batch_size 4 \
     --seq_lens 2048 \
