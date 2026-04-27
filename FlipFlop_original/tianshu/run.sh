@@ -1,13 +1,5 @@
 #!/bin/bash
 
-export PATH=/usr/local/corex-4.3.0/bin:$PATH
-export LD_LIBRARY_PATH=/usr/local/corex-4.3.0/lib64:/usr/local/corex-4.3.0/lib:/root/.infini/lib:$LD_LIBRARY_PATH
-
-# 2. 确保 CUDA_HOME 也指向这里，以便 torch.utils.cpp_extension 编译
-export CUDA_HOME=/usr/local/corex-4.3.0
-
-# 3. 保持原有的 PYTHONPATH
-export PYTHONPATH=$(pwd)/../../..
 
 KERNEL_FILE="/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu"
 BATCH_SIZE=4
