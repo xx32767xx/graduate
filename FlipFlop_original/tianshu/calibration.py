@@ -307,6 +307,7 @@ class Calibrator:
         d_buf = torch.from_numpy(arr).cuda()
         d_out = torch.zeros(1, dtype=torch.float32).cuda()
 
+        print("?????")
         # 6. 测量延迟
         # 预热一次
         module.launch_global_latency(d_buf.data_ptr(), N, chaseIters, strideVal, d_out.data_ptr())
@@ -321,6 +322,7 @@ class Calibrator:
         torch.cuda.synchronize()
 
         ms = start_ev.elapsed_time(end_ev)
+        print(ms)
         # 单次访问耗时 (ns) = (总毫秒 / 追逐次数) * 1,000,000
         per_load_ns = (ms / chaseIters) * 1e6
 
