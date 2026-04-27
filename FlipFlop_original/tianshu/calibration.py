@@ -36,31 +36,30 @@ class Calibrator:
 
         # Existing latency/throughput measurements
         overhead_ns   = self._repeat_and_average(self._measure_kernel_launch_overhead)
-	print(1)
         lat_coal_ns   = self._repeat_and_average(lambda: self._measure_global_latency(False))
-	print(1)
+        print(1)
         lat_uncoal_ns = self._repeat_and_average(lambda: self._measure_global_latency(True))
-	print(1)
+        print(2)
         partial_meas = []
         for off in [64, 128, 256, 512]:
             val = self._repeat_and_average(lambda: self._measure_partial_coalescing_latency(offset=off))
             partial_meas.append((off, val))
-	print(1)
+        print(3)
         partial_slope, partial_intcp = self._fit_linear_regression(partial_meas)
-	print(1)
+        print(4)
         lat_shared_ns  = self._repeat_and_average(self._measure_shared_latency)
-	print(1)
+        print(5)
         lat_local_ns   = self._repeat_and_average(self._measure_local_latency)
-        print(1)
-	issue_cycles   = self._repeat_and_average(self._measure_issue_cycles)
-	print(1)
+        print(6)
+        issue_cycles   = self._repeat_and_average(self._measure_issue_cycles)
+        print(7)
         eff_bw_gbps    = self._repeat_and_average(self._measure_streaming_bandwidth)
-	print(1)
+        print(8)
         dep_del_coal_s    = (lat_coal_ns   * 1e-9) / 16.0
         dep_del_uncoal_s  = (lat_uncoal_ns * 1e-9) /  8.0
 
         occupancy_shape_param = self._measure_shape_occupancy_factor()
-	print(1)
+        print(9)
         new_info = {
             self.arch_key: {
                 "baseline_kernel_overhead_ns": overhead_ns,
