@@ -105,6 +105,7 @@ def get_launch_func(kernel_source_path):
             print(f"[WARNING] Include dir not found: {d}")
     # =========================================================
 
+    print(123123123)
     custom_module = load_inline(
         name='bi_v150_launcher_v2',
         cpp_sources=[cpp_source],
@@ -117,7 +118,7 @@ def get_launch_func(kernel_source_path):
                           ] + include_flags,
         verbose=True
     )
-
+    print(686867678)
     return custom_module.launch_add_rmsnorm
 
 def compile_kernel(kernel_path: str, arch_options: list):
