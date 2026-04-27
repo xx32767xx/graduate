@@ -135,11 +135,10 @@ def get_launch_func(kernel_source_path):
 
     return custom_module.launch_add_rmsnorm
 
+
 def compile_kernel(kernel_path: str, arch_options: list):
-    # 1. 确定输出路径
     ptx_path = kernel_path + ".ptx"
-    # 2. 构建 ixcc 编译命令
-    cmd = ["ixcc", "--ptx", "-v"] + arch_options + [kernel_path, "-o", ptx_path]
+    cmd = ["nvcc", "--ptx", "-v"] + arch_options + [kernel_path, "-o", ptx_path]
 
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -148,7 +147,7 @@ def compile_kernel(kernel_path: str, arch_options: list):
         print(compile_log)
 
         if process.returncode != 0:
-            raise RuntimeError(f"ixcc 编译失败: {stderr}")
+            raise RuntimeError(f"nvcc 编译失败: {stderr}")
 
         with open(ptx_path, 'r') as f:
             ptx_str = f.read()
@@ -157,6 +156,10 @@ def compile_kernel(kernel_path: str, arch_options: list):
         kernel_name = m.group(1) if m else "unknown_kernel"
 
         return None, ptx_str, compile_log, kernel_name
+
+    except Exception as e:
+        print(f"编译过程中出现错误: {e}")
+        raise
 
     except Exception as e:
         print(f"编译过程中出现错误: {e}")
