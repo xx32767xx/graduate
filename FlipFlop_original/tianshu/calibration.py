@@ -21,7 +21,7 @@ os.environ['TORCH_NVCC_FLAGS'] = '-x ivcore --cuda-gpu-arch=ivcore11'
 
 class Calibrator:
 
-    def __init__(self, device_id=0, runs=3, idle_sleep=2.0,
+    def __init__(self, device_id=0, runs=1, idle_sleep=2.0,
                  calibration_file="calibration.json"):
         self.arch = GPUArchitecture(device_id, calibration_file)
         self.device_name = self.arch.name
