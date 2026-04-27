@@ -16,35 +16,40 @@ from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
 
+# ============ 禁用编译缓存，使用独立临时目录 ============
+import tempfile
+import atexit
+
+_CALIB_BUILD_DIR = tempfile.mkdtemp(prefix="calib_run_")
+os.environ['TORCH_EXTENSIONS_DIR'] = _CALIB_BUILD_DIR
+
+def _cleanup_build_dir():
+    import shutil
+    shutil.rmtree(_CALIB_BUILD_DIR, ignore_errors=True)
+atexit.register(_cleanup_build_dir)
+
+print(f"[INFO] Using temp build directory: {_CALIB_BUILD_DIR}")
+# ========================================================
+
 
 def get_launch_func(kernel_source_path):
-    import subprocess, os, re
-
-    result = subprocess.run(['nvcc', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    print("--- Python Subprocess NVCC Check ---")
-    print(result.stdout)
-    print("------------------------------------")
+    import os, re
 
     with open(kernel_source_path, 'r') as f:
         original_cuda = f.read()
 
-    # ============ 递归解析所有 #include，自动添加 -I ============
     kernel_dir = os.path.dirname(os.path.abspath(kernel_source_path))
 
     def find_all_includes(source_code, base_dir):
-        """递归找到所有 #include 引用的目录"""
         include_pattern = re.compile(r'#include\s+"([^"]+)"')
         include_dirs = set()
         include_dirs.add(base_dir)
-
-        # 第一层：当前文件的 include
         includes = include_pattern.findall(source_code)
         for inc_path in includes:
             full_path = os.path.normpath(os.path.join(base_dir, inc_path))
             inc_dir = os.path.dirname(full_path)
             if os.path.exists(inc_dir):
                 include_dirs.add(inc_dir)
-            # 如果文件存在，递归解析
             if os.path.exists(full_path):
                 try:
                     with open(full_path, 'r') as f:
@@ -52,12 +57,21 @@ def get_launch_func(kernel_source_path):
                     include_dirs.update(find_all_includes(sub_source, inc_dir))
                 except:
                     pass
-
         return include_dirs
 
     include_dirs = find_all_includes(original_cuda, kernel_dir)
 
-    # 添加系统路径
+    # ============ 关键：添加 InfiniCore/include ============
+    infini_project_root = kernel_dir
+    for _ in range(5):
+        infini_project_root = os.path.dirname(infini_project_root)
+
+    include_dir = os.path.join(infini_project_root, "include")
+    if os.path.exists(include_dir):
+        include_dirs.add(include_dir)
+        print(f"[DEBUG] Added: {include_dir}")
+    # =====================================================
+
     system_paths = [
         "/usr/local/corex/include",
         "/usr/local/corex-4.3.0/include",
@@ -66,20 +80,10 @@ def get_launch_func(kernel_source_path):
     ]
     include_dirs.update(p for p in system_paths if os.path.exists(p))
 
-    # 向上找项目根目录
-    project_root = kernel_dir
-    for _ in range(6):
-        project_root = os.path.dirname(project_root)
-    include_dirs.add(project_root)
-    if os.path.exists(os.path.join(project_root, "include")):
-        include_dirs.add(os.path.join(project_root, "include"))
-
     include_flags = []
     for d in sorted(include_dirs):
         if os.path.exists(d):
             include_flags.extend(["-I", d])
-            print(f"[DEBUG] Added include: {d}")
-    # ============================================================
 
     cuda_source = original_cuda + r'''
     extern "C" void launch_add_rmsnorm(
@@ -112,7 +116,7 @@ def get_launch_func(kernel_source_path):
     """
 
     custom_module = load_inline(
-        name='bi_v150_launcher_v2',
+        name='bi_v150_launcher_v3',  # 换名字避免缓存
         cpp_sources=[cpp_source],
         cuda_sources=[cuda_source],
         functions=['launch_add_rmsnorm'],
