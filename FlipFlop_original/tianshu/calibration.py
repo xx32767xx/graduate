@@ -19,6 +19,21 @@ from torch.utils.cpp_extension import load_inline
 os.environ['TORCH_CUDA_ARCH_LIST'] = 'ivcore11'
 os.environ['TORCH_NVCC_FLAGS'] = '-x ivcore --cuda-gpu-arch=ivcore11'
 
+# ============ 禁用编译缓存，使用独立临时目录 ============
+import tempfile
+import atexit
+
+_CALIB_BUILD_DIR = tempfile.mkdtemp(prefix="calib_build_")
+os.environ['TORCH_EXTENSIONS_DIR'] = _CALIB_BUILD_DIR
+
+def _cleanup_build_dir():
+    import shutil
+    shutil.rmtree(_CALIB_BUILD_DIR, ignore_errors=True)
+atexit.register(_cleanup_build_dir)
+
+print(f"[INFO] Using temp build directory: {_CALIB_BUILD_DIR}")
+# ========================================================
+
 class Calibrator:
 
     def __init__(self, device_id=0, runs=1, idle_sleep=2.0,
@@ -357,7 +372,7 @@ class Calibrator:
             cuda_sources=kernel_src,
             functions=["launch_partial_lat"],
             extra_cuda_cflags=["-x ivcore"],
-            verbose=False,
+            verbose=True,
         )
         N = 128 * 1024
         chaseIters = 200000
@@ -373,7 +388,6 @@ class Calibrator:
         d_buf = torch.from_numpy(arr).cuda()
         d_out = torch.zeros(1, dtype=torch.float32).cuda()
 
-        print("123")
         module.launch_partial_lat(d_buf.data_ptr(), N, strideVal, chaseIters, d_out.data_ptr())
         torch.cuda.synchronize()
         start_ev = torch.cuda.Event(enable_timing=True)
@@ -383,7 +397,6 @@ class Calibrator:
         end_ev.record()
         torch.cuda.synchronize()
         ms = start_ev.elapsed_time(end_ev)
-        print(ms)
         per_load_ns = (ms * 1e6) / chaseIters
         return float(per_load_ns)
 
@@ -433,7 +446,7 @@ class Calibrator:
             cuda_sources=kernel_src,
             functions=["launch_shared_lat"],
             extra_cuda_cflags=["-x ivcore"],
-            verbose=False,
+            verbose=True,
         )
 
         # 5. 准备参数
@@ -492,7 +505,7 @@ class Calibrator:
             cuda_sources=kernel_src,
             functions=["launch_local_lat_test"],
             extra_cuda_cflags=["-x ivcore"],
-            verbose=False,
+            verbose=True,
         )
 
         # 5. 准备参数
