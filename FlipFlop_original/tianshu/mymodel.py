@@ -12,13 +12,21 @@ import torch
 from torch.utils.cpp_extension import load_inline
 
 
-# from gpu_common import GPUArchitecture
+from gpu_common import GPUArchitecture
 from PTXAnalyzer import PTXAnalyzer
 from time_model import HongKimExecutionTimeModel
 
 
 def get_launch_func(kernel_source_path):
-    # 读取你原来的 .cu 文件内容
+    import subprocess
+    import os
+
+    result = subprocess.run(['nvcc', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print("--- Python Subprocess NVCC Check ---")
+    print(result.stdout)
+    print("------------------------------------")
+
+    # 读取 .cu 文件内容
     with open(kernel_source_path, 'r') as f:
         original_cuda = f.read()
 
@@ -35,16 +43,12 @@ def get_launch_func(kernel_source_path):
         <<<grid_x, block_x>>>(
             (float*)y_ptr,
             (float*)res_ptr,
-
             s_b1, s_n1,
             s_b2, s_n2,
-
             (float*)a_ptr,
             s_ba, s_na,
-
             (float*)b_ptr,
             s_bb, s_nb,
-
             (float*)w_ptr,
             nhead,
             dim,
@@ -52,7 +56,7 @@ def get_launch_func(kernel_source_path):
         );
     }
     '''
-    # 定义 C++ 中间层代码：它接收指针并启动内核
+
     cpp_source = """
     extern "C" void launch_add_rmsnorm(
         long y_ptr, long res_ptr, 
@@ -63,19 +67,55 @@ def get_launch_func(kernel_source_path):
         int grid_x, int block_x);
     """
 
-    # 动态编译并加载
-    # extra_cuda_cflags=["-x", "ivcore"] 是天数智芯 ixcc 的关键参数
+    # ============ 根据 include 路径计算实际的包含目录 ============
+    kernel_dir = os.path.dirname(os.path.abspath(kernel_source_path))
+    # kernel_dir = .../InfiniCore/src/infiniop/ops/add_rms_norm/nvidia
+
+    # 根据 #include 的相对路径，计算需要添加的 -I 目录
+    # "../../../devices/nvidia/nvidia_common.cuh" -> 从 kernel_dir 向上3级到 InfiniCore/
+    infinicore_root = os.path.abspath(os.path.join(kernel_dir, "../../.."))
+    # 即: .../InfiniCore/src/
+
+    # "../../../reduce/cuda/reduce.cuh" -> 也在 InfiniCore/src/ 下
+    # "../cuda/kernel.cuh" -> InfiniCore/src/infiniop/ops/add_rms_norm/cuda/
+    add_rms_norm_dir = os.path.abspath(os.path.join(kernel_dir, ".."))
+
+    # 构建包含路径列表
+    include_dirs = [
+        kernel_dir,  # 当前 .cu 文件目录
+        add_rms_norm_dir,  # ../ (add_rms_norm/)
+        os.path.join(add_rms_norm_dir, "cuda"),  # ../cuda/
+        infinicore_root,  # InfiniCore/src/
+        os.path.join(infinicore_root, "devices", "nvidia"),  # src/devices/nvidia/
+        os.path.join(infinicore_root, "reduce"),  # src/reduce/
+        os.path.join(infinicore_root, "reduce", "cuda"),  # src/reduce/cuda/
+        "/usr/local/corex/include",
+        "/usr/local/corex-4.3.0/include",
+        "/usr/local/cuda/include",
+        "/usr/local/cuda/include/cub",
+    ]
+
+    include_flags = []
+    for d in include_dirs:
+        if os.path.exists(d):
+            include_flags.append("-I")
+            include_flags.append(d)
+            print(f"[DEBUG] Added include: {d}")
+        else:
+            print(f"[WARNING] Include dir not found: {d}")
+    # =========================================================
+
     custom_module = load_inline(
-        name='bi_v150_launcher_v2',  # 更换名字强制重新触发编译
+        name='bi_v150_launcher_v2',
         cpp_sources=[cpp_source],
         cuda_sources=[cuda_source],
         functions=['launch_add_rmsnorm'],
         extra_cuda_cflags=[
-            "-x", "ivcore",  # 必须拆分为两个元素
-            "--cuda-gpu-arch=ivcore11",  # 确保没有多余空格
-            "-I/usr/local/corex/include",
-            "-O3"
-        ]
+                              "-x", "ivcore",
+                              "--cuda-gpu-arch=ivcore11",
+                              "-O3"
+                          ] + include_flags,
+        verbose=True
     )
 
     return custom_module.launch_add_rmsnorm
@@ -167,14 +207,13 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
 
     for block_x, block_y in block_combos:
         print(f"blocks: {block_x}, {block_y}  \n\n\n")
-        '''
+
         analyzer = PTXAnalyzer(ptx_str, ptxas_log, kernel_arch, block_x, block_y, {})
         analysis = analyzer.analyze()
         print(analysis)
         time_model = HongKimExecutionTimeModel(
             kernel_arch, analysis, (batch_size * nhead, 1), (block_x, block_y))
         est_time_ns = time_model.estimate_time_ns()
-        '''
 
         data = prepare_data_torch(batch_size, dim_per_head, nhead)
         grid_size = int(batch_size * nhead)
@@ -191,6 +230,7 @@ def run_configuration(kernel_path, kernel_arch, batch_size, seq_length, nhead, d
         end.record()
         torch.cuda.synchronize()
         time_ms = start.elapsed_time(end) / 50 * 1e6
+        print(f"time: {est_time_ns:.3f} ms")
         print(f"Avg time: {time_ms:.3f} ns \n\n\n")
 
     return bench_results
@@ -214,8 +254,7 @@ if __name__=="__main__":
     parser.add_argument("--iterations", type=int, default=5)
     args = parser.parse_args()
 
-    # arch = GPUArchitecture( device_id = 0, calibration_file=args.calib)
-    arch = []
+    arch = GPUArchitecture( device_id = 0, calibration_file=args.calib)
     seq_lens = [int(s) for s in args.seq_lens.split(",")] if args.seq_lens else [128]
 
 
