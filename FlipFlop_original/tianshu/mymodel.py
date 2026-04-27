@@ -18,17 +18,68 @@ from time_model import HongKimExecutionTimeModel
 
 
 def get_launch_func(kernel_source_path):
-    import subprocess
-    import os
+    import subprocess, os, re
 
     result = subprocess.run(['nvcc', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     print("--- Python Subprocess NVCC Check ---")
     print(result.stdout)
     print("------------------------------------")
 
-    # 读取 .cu 文件内容
     with open(kernel_source_path, 'r') as f:
         original_cuda = f.read()
+
+    # ============ 递归解析所有 #include，自动添加 -I ============
+    kernel_dir = os.path.dirname(os.path.abspath(kernel_source_path))
+
+    def find_all_includes(source_code, base_dir):
+        """递归找到所有 #include 引用的目录"""
+        include_pattern = re.compile(r'#include\s+"([^"]+)"')
+        include_dirs = set()
+        include_dirs.add(base_dir)
+
+        # 第一层：当前文件的 include
+        includes = include_pattern.findall(source_code)
+        for inc_path in includes:
+            full_path = os.path.normpath(os.path.join(base_dir, inc_path))
+            inc_dir = os.path.dirname(full_path)
+            if os.path.exists(inc_dir):
+                include_dirs.add(inc_dir)
+            # 如果文件存在，递归解析
+            if os.path.exists(full_path):
+                try:
+                    with open(full_path, 'r') as f:
+                        sub_source = f.read()
+                    include_dirs.update(find_all_includes(sub_source, inc_dir))
+                except:
+                    pass
+
+        return include_dirs
+
+    include_dirs = find_all_includes(original_cuda, kernel_dir)
+
+    # 添加系统路径
+    system_paths = [
+        "/usr/local/corex/include",
+        "/usr/local/corex-4.3.0/include",
+        "/usr/local/cuda/include",
+        "/usr/local/cuda/include/cub",
+    ]
+    include_dirs.update(p for p in system_paths if os.path.exists(p))
+
+    # 向上找项目根目录
+    project_root = kernel_dir
+    for _ in range(6):
+        project_root = os.path.dirname(project_root)
+    include_dirs.add(project_root)
+    if os.path.exists(os.path.join(project_root, "include")):
+        include_dirs.add(os.path.join(project_root, "include"))
+
+    include_flags = []
+    for d in sorted(include_dirs):
+        if os.path.exists(d):
+            include_flags.extend(["-I", d])
+            print(f"[DEBUG] Added include: {d}")
+    # ============================================================
 
     cuda_source = original_cuda + r'''
     extern "C" void launch_add_rmsnorm(
@@ -41,18 +92,11 @@ def get_launch_func(kernel_source_path):
     {
         add_rmsnormKernel<1024, float, float, float>
         <<<grid_x, block_x>>>(
-            (float*)y_ptr,
-            (float*)res_ptr,
-            s_b1, s_n1,
-            s_b2, s_n2,
-            (float*)a_ptr,
-            s_ba, s_na,
-            (float*)b_ptr,
-            s_bb, s_nb,
-            (float*)w_ptr,
-            nhead,
-            dim,
-            eps
+            (float*)y_ptr, (float*)res_ptr,
+            s_b1, s_n1, s_b2, s_n2,
+            (float*)a_ptr, s_ba, s_na,
+            (float*)b_ptr, s_bb, s_nb,
+            (float*)w_ptr, nhead, dim, eps
         );
     }
     '''
@@ -67,45 +111,6 @@ def get_launch_func(kernel_source_path):
         int grid_x, int block_x);
     """
 
-    # ============ 根据 include 路径计算实际的包含目录 ============
-    kernel_dir = os.path.dirname(os.path.abspath(kernel_source_path))
-    # kernel_dir = .../InfiniCore/src/infiniop/ops/add_rms_norm/nvidia
-
-    # 根据 #include 的相对路径，计算需要添加的 -I 目录
-    # "../../../devices/nvidia/nvidia_common.cuh" -> 从 kernel_dir 向上3级到 InfiniCore/
-    infinicore_root = os.path.abspath(os.path.join(kernel_dir, "../../.."))
-    # 即: .../InfiniCore/src/
-
-    # "../../../reduce/cuda/reduce.cuh" -> 也在 InfiniCore/src/ 下
-    # "../cuda/kernel.cuh" -> InfiniCore/src/infiniop/ops/add_rms_norm/cuda/
-    add_rms_norm_dir = os.path.abspath(os.path.join(kernel_dir, ".."))
-
-    # 构建包含路径列表
-    include_dirs = [
-        kernel_dir,  # 当前 .cu 文件目录
-        add_rms_norm_dir,  # ../ (add_rms_norm/)
-        os.path.join(add_rms_norm_dir, "cuda"),  # ../cuda/
-        infinicore_root,  # InfiniCore/src/
-        os.path.join(infinicore_root, "devices", "nvidia"),  # src/devices/nvidia/
-        os.path.join(infinicore_root, "reduce"),  # src/reduce/
-        os.path.join(infinicore_root, "reduce", "cuda"),  # src/reduce/cuda/
-        "/usr/local/corex/include",
-        "/usr/local/corex-4.3.0/include",
-        "/usr/local/cuda/include",
-        "/usr/local/cuda/include/cub",
-    ]
-
-    include_flags = []
-    for d in include_dirs:
-        if os.path.exists(d):
-            include_flags.append("-I")
-            include_flags.append(d)
-            print(f"[DEBUG] Added include: {d}")
-        else:
-            print(f"[WARNING] Include dir not found: {d}")
-    # =========================================================
-
-    print(123123123)
     custom_module = load_inline(
         name='bi_v150_launcher_v2',
         cpp_sources=[cpp_source],
@@ -118,8 +123,9 @@ def get_launch_func(kernel_source_path):
                           ] + include_flags,
         verbose=True
     )
-    print(686867678)
+
     return custom_module.launch_add_rmsnorm
+
 
 def compile_kernel(kernel_path: str, arch_options: list):
     # 1. 确定输出路径
