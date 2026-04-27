@@ -20,11 +20,10 @@ from time_model import HongKimExecutionTimeModel
 def get_launch_func(kernel_source_path):
     # 读取你原来的 .cu 文件内容
     with open(kernel_source_path, 'r') as f:
-        cuda_source = f.read()
+        original_cuda = f.read()
 
-    # 定义 C++ 中间层代码：它接收指针并启动内核
-    cpp_source = '''
-        extern "C" void launch_add_rmsnorm(
+    cuda_source = original_cuda + r'''
+    extern "C" void launch_add_rmsnorm(
         long y_ptr, long res_ptr, 
         long s_b1, long s_n1, long s_b2, long s_n2,
         long a_ptr, long s_ba, long s_na,
@@ -32,27 +31,37 @@ def get_launch_func(kernel_source_path):
         long w_ptr, long nhead, long dim, float eps,
         int grid_x, int block_x)
     {
-    add_rmsnormKernel<1024, float, float, float>
-    <<<grid_x, block_x>>>(
-        (float*)y_ptr,
-        (float*)res_ptr,
+        add_rmsnormKernel<1024, float, float, float>
+        <<<grid_x, block_x>>>(
+            (float*)y_ptr,
+            (float*)res_ptr,
 
-        s_b1, s_n1,
-        s_b2, s_n2,
+            s_b1, s_n1,
+            s_b2, s_n2,
 
-        (float*)a_ptr,
-        s_ba, s_na,
+            (float*)a_ptr,
+            s_ba, s_na,
 
-        (float*)b_ptr,
-        s_bb, s_nb,
+            (float*)b_ptr,
+            s_bb, s_nb,
 
-        (float*)w_ptr,
-        nhead,
-        dim,
-        eps
+            (float*)w_ptr,
+            nhead,
+            dim,
+            eps
         );
     }
     '''
+    # 定义 C++ 中间层代码：它接收指针并启动内核
+    cpp_source = """
+    extern "C" void launch_add_rmsnorm(
+        long y_ptr, long res_ptr, 
+        long s_b1, long s_n1, long s_b2, long s_n2,
+        long a_ptr, long s_ba, long s_na,
+        long b_ptr, long s_bb, long s_nb,
+        long w_ptr, long nhead, long dim, float eps,
+        int grid_x, int block_x);
+    """
 
     # 动态编译并加载
     # extra_cuda_cflags=["-x", "ivcore"] 是天数智芯 ixcc 的关键参数
