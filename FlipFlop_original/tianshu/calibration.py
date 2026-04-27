@@ -230,7 +230,7 @@ class Calibrator:
         torch.cuda.synchronize()
 
         times_ms = []
-        N = 200
+        N = 20
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
 
