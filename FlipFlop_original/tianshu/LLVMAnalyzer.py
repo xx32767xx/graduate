@@ -3,6 +3,8 @@ import re
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
+from gpu_common import GPUArchitecture
+
 
 class InstInfo:
     def __init__(self, op:str, args:List[str]):
@@ -595,7 +597,7 @@ class LLVMAnalyzer:
         return base_conflict
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     with open('op.ll', 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -605,5 +607,6 @@ if __name__ == "main":
         "template_param": [1024],
         "data_type": ["float", "half", "half"]
     }
-    analyzer = LLVMAnalyzer(content, None, block_x, block_y, {}, kernel_param)
+    arch = GPUArchitecture(device_id = 0, calibration_file="calibration.json")
+    analyzer = LLVMAnalyzer(content, arch, block_x, block_y, {}, kernel_param)
     print(analyzer.analyze())
