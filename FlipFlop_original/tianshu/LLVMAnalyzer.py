@@ -594,14 +594,16 @@ class LLVMAnalyzer:
             return base_conflict * 1.2
         return base_conflict
 
-with open('op.ll', 'r', encoding='utf-8') as f:
-    content = f.read()
 
-block_x = 64
-block_y = 64
-kernel_param = {
-    "template_param":[1024],
-    "data_type":["float","half","half"]
-}
-analyzer = LLVMAnalyzer(content, None, block_x, block_y, {},kernel_param)
-print(analyzer.analyze())
+if __name__ == "main":
+    with open('op.ll', 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    block_x = 64
+    block_y = 64
+    kernel_param = {
+        "template_param": [1024],
+        "data_type": ["float", "half", "half"]
+    }
+    analyzer = LLVMAnalyzer(content, None, block_x, block_y, {}, kernel_param)
+    print(analyzer.analyze())
