@@ -19,4 +19,5 @@ if __name__ == "__main__":
     print(analysis)
     time_model = HongKimExecutionTimeModel(
         arch, analysis, (16, 1), (block_x, block_y))
-    est_time_ns = time_model.estimate_time_ns()
+    est_time_ms = time_model.estimate_time_ns() / 1e6
+    print(f"time is {est_time_ms} ms")
