@@ -3,48 +3,138 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import infinicore  # 先导入 infinicore
+import infinicore
 import torch
 
+from FlipFlop_original.framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner, is_broadcast
+
 # ==============================================================================
-# 配置部分：仅保留大尺寸 Tensor 以获得有意义的剖析数据
+# Operator-specific configuration
 # ==============================================================================
+
 _TEST_CASES_DATA = [
-    # 较大的形状能让 GPU 负载饱和，从而测得准确的访存周期
-    ((16, 2048), (16, 2048), (16, 2048), (2048,), None, None, None),
-    ((15, 3584), (15, 3584), (15, 3584), (3584,), None, None, None),
-    ((4, 4, 2048), (4, 4, 2048), (4, 4, 2048), (2048,), None, None, None),
+    ((16, 4096), (16, 4096), (16, 4096), (4096,)),
 ]
 
+# Tolerance configuration
 _TOLERANCE_MAP = {
     infinicore.float16: {"atol": 2e-3, "rtol": 2e-3},
     infinicore.bfloat16: {"atol": 1e-2, "rtol": 1e-2},
     infinicore.float32: {"atol": 1e-5, "rtol": 1e-4},
 }
 
-_INPUT_DTYPES = [infinicore.float16]
-_WEIGHT_DTYPES = [infinicore.float16, infinicore.float32]
+# Data types for individual tensors
+_INPUT_DTYPES = [infinicore.float16, infinicore.bfloat16]
+_WEIGHT_DTYPES = [infinicore.float16, infinicore.bfloat16, infinicore.float32]
+
+# EPSILON constant for AddRMSNorm
 _EPSILON = 1e-5
 
 
-def run_profile_mode():
-    print(">>> 开启剖析专用模式 (Profile Mode) <<<")
-    # 预热并准备数据
-    shape = (16, 2048)
-    a = torch.randn(shape, device='cuda', dtype=torch.float16)
-    b = torch.randn(shape, device='cuda', dtype=torch.float16)
-    w = torch.randn((2048,), device='cuda', dtype=torch.float16)
+def parse_test_cases():
+    """
+    Parse AddRMSNorm test case data and return list of TestCase objects.
+    Format: (y_shape, a_shape, b_shape, w_shape, y_strides, a_strides, b_strides)
+    """
+    test_cases = []
 
-    # 执行 50 次循环以稳定硬件计数器[cite: 1]
-    for _ in range(10):
-        infinicore.add_rms_norm(a, b, w, _EPSILON)
+    for data in _TEST_CASES_DATA:
+        y_shape = data[0]  # Output shape
+        a_shape = data[1]  # First input shape
+        b_shape = data[2]  # Second input shape
+        w_shape = data[3]  # Weight shape (1D)
+        y_strides = data[4] if len(data) > 4 else None
+        a_strides = data[5] if len(data) > 5 else None
+        b_strides = data[6] if len(data) > 6 else None
 
-    torch.cuda.synchronize()
-    print(">>> 运行结束，正在刷新 ixprof 缓冲区 <<<")
+        # Check if tensors support in-place operations
+        a_supports_inplace = not is_broadcast(a_strides)
+        b_supports_inplace = not is_broadcast(b_strides)
+        y_supports_inplace = not is_broadcast(y_strides)
+
+        # Generate test cases for all dtype combinations
+        for input_dtype in _INPUT_DTYPES:
+            for weight_dtype in _WEIGHT_DTYPES:
+                # Use input dtype tolerance for output
+                tolerance = _TOLERANCE_MAP.get(
+                    input_dtype, {"atol": 1e-5, "rtol": 1e-4}
+                )
+
+                # Create typed tensor specs
+                a_spec = TensorSpec.from_tensor(a_shape, a_strides, input_dtype)
+                b_spec = TensorSpec.from_tensor(b_shape, b_strides, input_dtype)
+                w_spec = TensorSpec.from_tensor(
+                    w_shape, None, weight_dtype
+                )  # Weight is always contiguous
+                y_spec = TensorSpec.from_tensor(y_shape, y_strides, input_dtype)
+
+                # Test Case 1: Out-of-place (return value) - returns (normalized_result, add_result)
+                residual_out_spec = TensorSpec.from_tensor(
+                    a_shape, a_strides, input_dtype
+                )
+                test_cases.append(
+                    TestCase(
+                        inputs=[a_spec, b_spec, w_spec],
+                        kwargs={"epsilon": _EPSILON},
+                        output_specs=None,  # Two outputs
+                        comparison_target=None,
+                        tolerance=tolerance,
+                        output_count=2,  # Two outputs: normalized_result and add_result
+                        description=f"AddRMSNorm - OUT_OF_PLACE",
+                    )
+                )
+
+    return test_cases
 
 
-# ==============================================================================
-# 3. 主逻辑判断
-# ==============================================================================
+class OpTest(BaseOperatorTest):
+    """AddRMSNorm operator test with simplified implementation"""
+
+    def __init__(self):
+        super().__init__("AddRMSNorm")
+
+    def get_test_cases(self):
+        return parse_test_cases()
+
+    def torch_operator(
+        self, a, b, weight, epsilon=_EPSILON, out=None, residual=None, **kwargs
+    ):
+        """PyTorch AddRMSNorm implementation - returns (normalized_result, add_result)"""
+        input_dtype = a.dtype
+
+        # Compute add(a, b)
+        sum_tensor = a.to(torch.float32) + b.to(torch.float32)
+        weight_fp32 = weight.to(torch.float32)
+
+        # Calculate RMSNorm: (a + b) * weight / sqrt(mean((a+b)^2) + epsilon)
+        variance = sum_tensor.pow(2).mean(-1, keepdim=True)
+        normalized_result = sum_tensor * torch.rsqrt(variance + epsilon) * weight_fp32
+
+        # Convert back to original dtype
+        normalized_result = normalized_result.to(input_dtype)
+        add_result = sum_tensor.to(input_dtype)
+
+        if out is not None:
+            out.copy_(normalized_result)
+        if residual is not None:
+            residual.copy_(add_result)
+
+        return (normalized_result, add_result)
+
+    def infinicore_operator(
+        self, a, b, weight, epsilon=_EPSILON, out=None, residual=None, **kwargs
+    ):
+        """InfiniCore AddRMSNorm implementation - returns (normalized_result, add_result)"""
+        return infinicore.add_rms_norm(
+            a, b, weight, epsilon, out=out, residual=residual
+        )
+
+
+def main():
+    """Main entry point"""
+    runner = GenericTestRunner(OpTest)
+    runner.run_and_exit()
+
+
 if __name__ == "__main__":
-    run_profile_mode()
+    main()
