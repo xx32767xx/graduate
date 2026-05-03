@@ -18,8 +18,10 @@ except ImportError:
 class GPUArchitecture:
     def __init__(self, device_id=0, calibration_file=None):
         # 1. 锁定设备索引
+        """
         if not torch.cuda.is_available():
             raise RuntimeError("未检测到天数智芯显卡，请检查 ixsmi")
+        """
 
         torch.cuda.set_device(device_id)
         self.device_id = device_id
