@@ -596,17 +596,3 @@ class LLVMAnalyzer:
             return base_conflict * 1.2
         return base_conflict
 
-
-if __name__ == "__main__":
-    with open('op.ll', 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    block_x = 64
-    block_y = 64
-    kernel_param = {
-        "template_param": [1024],
-        "data_type": ["float", "half", "half"]
-    }
-    arch = GPUArchitecture(device_id = 0, calibration_file="calibration.json")
-    analyzer = LLVMAnalyzer(content, arch, block_x, block_y, {}, kernel_param)
-    print(analyzer.analyze())
