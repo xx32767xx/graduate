@@ -1,11 +1,10 @@
 import sys
 import os
-import torch
-import infinicore
 
-# 保持路径引入逻辑不变
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import infinicore  # 先导入 infinicore
+import torch
 from framework import (
     BaseOperatorTest,
     TensorSpec,
@@ -98,7 +97,7 @@ def run_profile_mode():
     w = torch.randn((2048,), device='cuda', dtype=torch.float16)
 
     # 执行 50 次循环以稳定硬件计数器[cite: 1]
-    for _ in range(50):
+    for _ in range(10):
         infinicore.add_rms_norm(a, b, w, _EPSILON)
 
     torch.cuda.synchronize()
