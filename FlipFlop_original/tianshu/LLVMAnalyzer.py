@@ -715,6 +715,7 @@ class LLVMAnalyzer:
         return max_reg
 
     def _debug_pressure(self):
+        print(self.cfg)
         for b in range(len(self.basic_blocks)):
             live = self.reg_in[b] | self.reg_out[b]
 
