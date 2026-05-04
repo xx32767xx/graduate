@@ -84,6 +84,9 @@ class LLVMAnalyzer:
         total_insts = (mem_coal + mem_un + mem_part +
                        inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
 
+
+        self._debug_pressure()
+
         from gpu_common import KernelAnalysis
         return KernelAnalysis(
             mem_coal=int(mem_coal),
@@ -711,3 +714,13 @@ class LLVMAnalyzer:
 
         return max_reg
 
+    def _debug_pressure(self):
+        for b in range(len(self.basic_blocks)):
+            live = self.reg_in[b] | self.reg_out[b]
+
+            print(
+                f"Block {b}: "
+                f"USE={len(self.reg_use[b])} "
+                f"DEF={len(self.reg_def[b])} "
+                f"LIVE={len(live)}"
+            )
