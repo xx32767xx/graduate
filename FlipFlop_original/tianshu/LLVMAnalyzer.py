@@ -49,6 +49,12 @@ class LLVMAnalyzer:
         # 正则表达式
         self._prepare_regex()
 
+        self.reg_use:Dict[int,set[str]] = defaultdict(set)
+        self.reg_def:Dict[int,set[str]] = defaultdict(set)
+        self.reg_in:Dict[int,set[str]] = defaultdict(set)
+        self.reg_out:Dict[int,set[str]] = defaultdict(set)
+
+
     def _prepare_regex(self):
         # 匹配函数入口 (Kernel 定义)
         self.re_entry = re.compile(r"define.*iluvatar_kernel.*@([\w_]+)")
@@ -60,10 +66,10 @@ class LLVMAnalyzer:
 
     def analyze(self):
         self._prepare_regex()
-        self._parse_llvm_resource_usage()
         self._build_label_map()
         self._split_basic_blocks()
         self._connect_blocks()
+        self._parse_llvm_resource_usage()
 
         loops = self._detect_loops()
         self._calculate_block_weights(loops)
@@ -169,11 +175,11 @@ class LLVMAnalyzer:
         return clean_lines
 
     def _parse_llvm_resource_usage(self):
-        # 1. 估算寄存器: 查找代码中最大的虚拟寄存器编号，例如 %542
-        vreg_nums = [int(n) for n in re.findall(r'%(\d+)', "\n".join(self.llvm_code))]
-        max_vreg = max(vreg_nums) if vreg_nums else 32
-        # 物理寄存器通常通过复用会比 SSA 变量少，这里取个经验比例（如 0.6）
-        self.regs_per_thread = int(max_vreg * 0.6)
+
+        # 1. 估计寄存器使用数目
+        self._build_use_def()
+        self._compute_in_out()
+        self.regs_per_thread = int(self._estimate_registers_precise() * 0.85)
 
         # 2. 统计共享内存
         self.shared_mem_used = self._extract_shm_from_ir()
@@ -595,4 +601,113 @@ class LLVMAnalyzer:
         if has_shared and self.block_x > warp_size:
             return base_conflict * 1.2
         return base_conflict
+
+    def _normalize_reg(self, token: str):
+
+        m = re.match(r"%(\d+)", token)
+        if m:
+            return m.group(1)
+        return None
+
+    def _build_use_def(self):
+        reg_pattern = re.compile(r"%\d+")
+        for block_id, block in enumerate(self.basic_blocks):
+            for inst in block:
+                if "=" in inst:
+                    lhs, rhs = inst.split("=", 1)
+                    def_var = self._normalize_reg(lhs.strip())
+
+                    if def_var:
+                        self.reg_def[block_id].add(def_var)
+
+                    uses = reg_pattern.findall(rhs)
+                    for u in uses:
+                        u_norm = self._normalize_reg(u)
+                        if u_norm:
+                            self.reg_use[block_id].add(u_norm)
+
+                else:
+                    uses = reg_pattern.findall(inst)
+                    for u in uses:
+                        u_norm = self._normalize_reg(u)
+                        if u_norm:
+                            self.reg_use[block_id].add(u_norm)
+
+    def _compute_in_out(self):
+        """
+        Optimized dataflow analysis using worklist
+        """
+
+        # 初始化
+        for b in range(len(self.basic_blocks)):
+            self.reg_in[b] = set()
+            self.reg_out[b] = set()
+
+        work_list = list(range(len(self.basic_blocks)))
+
+        while work_list:
+            b = work_list.pop()
+
+            old_in = self.reg_in[b].copy()
+            old_out = self.reg_out[b].copy()
+
+            # ---- OUT[b] ----
+            new_out = set()
+            for succ in self.cfg.get(b, []):
+                new_out |= self.reg_in[succ]
+
+            self.reg_out[b] = new_out
+
+            # ---- IN[b] ----
+            self.reg_in[b] = self.reg_use[b] | (self.reg_out[b] - self.reg_def[b])
+
+            # ---- 如果变化，加入前驱 ----
+            if self.reg_in[b] != old_in or self.reg_out[b] != old_out:
+                for pred in self._get_predecessors(b):
+                    if pred not in work_list:
+                        work_list.append(pred)
+
+    def _get_predecessors(self, block_id):
+        pre = []
+        for b, success in self.cfg.items():
+            if block_id in success:
+                pre.append(b)
+        return pre
+
+
+    def _estimate_registers_precise(self):
+        max_reg = 0
+        for b, block in enumerate(self.basic_blocks):
+            live = set(self.reg_out[b])
+
+            # 当前 block 内的峰值
+            peak = len(live)
+
+            # 逆序扫描（关键：liveness 是 backward）
+            for inst in reversed(block):
+                # Step 1: 处理 DEF（先删除）
+                if "=" in inst:
+                    lhs, _ = inst.split("=", 1)
+
+                    # 提取定义的寄存器
+                    def_var = self._normalize_reg(lhs.strip())
+
+                    if def_var is not None:
+                        # 向前看，这个值还没被定义 → 不应该 live
+                        live.discard(int(def_var))
+
+                # Step 2: 处理 USE（再加入）
+                uses = re.findall(r"%\d+", inst)
+                for u in uses:
+                    u_norm = self._normalize_reg(u)
+                    if u_norm is not None:
+                        live.add(int(u_norm))
+
+                if len(live) > peak:
+                    peak = len(live)
+
+            if peak > max_reg:
+                max_reg = peak
+
+        return max_reg
 
