@@ -125,7 +125,10 @@ class HongKimExecutionTimeModel:
         print(f"mem_total:{mem_total}    avg_mem_lat:{avg_mem_lat}")
         mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
         comp_cycles = comp_sum*self.issue_cycles    #计算周期
-
+        # 在estimate_time_ns中添加：
+        print(f"clock_rate_hz: {self.arch.clock_rate_hz}")
+        print(f"avg_mem_lat * clock_rate = {avg_mem_lat * self.arch.clock_rate_hz}")
+        print(f"mem_cycles = {mem_total} * {avg_mem_lat * self.arch.clock_rate_hz} = {mem_cycles}")
         # 计算偏离延迟
         if global_count>1e-9:
             w_coal = mem_coal/global_count

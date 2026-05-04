@@ -60,8 +60,8 @@ class GPUArchitecture:
         prop = torch.cuda.get_device_properties(device_id)
         mp_count = prop.multi_processor_count
         return {
-            'MULTIPROCESSOR_COUNT': 16,
-            'CLOCK_RATE': mp_count,  # in kHz
+            'MULTIPROCESSOR_COUNT': mp_count,
+            'CLOCK_RATE': 1500*1000,  # in kHz
             'GLOBAL_MEMORY_BUS_WIDTH': 4096,
             'MEMORY_CLOCK_RATE': 1600*1000,  # in kHz
             'MAX_THREADS_PER_MULTIPROCESSOR': 2048,
