@@ -720,7 +720,7 @@ class LLVMAnalyzer:
 
             print(
                 f"Block {b}: "
-                f"USE={len(self.reg_use[b])} "
-                f"DEF={len(self.reg_def[b])} "
+                f"USE={self.reg_use[b]} "
+                f"DEF={self.reg_def[b]} "
                 f"LIVE={len(live)}"
             )
