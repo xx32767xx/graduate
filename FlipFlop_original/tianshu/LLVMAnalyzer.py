@@ -605,123 +605,105 @@ class LLVMAnalyzer:
             return base_conflict * 1.2
         return base_conflict
 
-    def _normalize_reg(self, token: str):
+    def _normalize_reg(self, token: str) -> str:
+        """提取寄存器编号，例如从 '%120' 提取 '120'"""
+        m = re.search(r"%([\w.]+)", token)
+        return m.group(1) if m else "None"
 
-        m = re.match(r"%(\d+)", token)
-        if m:
-            return m.group(1)
+    def _get_def_from_inst(self, inst: str) -> str:
+        """
+        获取指令定义的寄存器 (等号左侧)
+        """
+        # 预处理：去掉注释
+        clean_inst = inst.split(';')[0].strip()
+        if "=" in clean_inst:
+            lhs = clean_inst.split("=")[0].strip()
+            return self._normalize_reg(lhs)
         return None
 
+    def _get_uses_from_inst(self, inst: str) -> List[str]:
+        """
+        获取指令使用的所有寄存器 (等号右侧或无等号指令)
+        """
+        clean_inst = inst.split(';')[0].strip()
+        # 如果有等号，只分析等号右侧的操作数
+        rhs = clean_inst.split("=")[1] if "=" in clean_inst else clean_inst
+
+        # 匹配所有 % 开头的寄存器名
+        reg_pattern = re.compile(r"%([\w.]+)")
+        matches = reg_pattern.findall(rhs)
+        return matches
+
     def _build_use_def(self):
-        reg_pattern = re.compile(r"%\d+")
+        """
+        构建每个基本块的 USE 和 DEF 集合
+        用于数据流分析
+        """
+        self.reg_use.clear()
+        self.reg_def.clear()
+
         for block_id, block in enumerate(self.basic_blocks):
+            defined_in_block = set()
+            used_in_block = set()
+
             for inst in block:
-                if "=" in inst:
-                    lhs, rhs = inst.split("=", 1)
-                    def_var = self._normalize_reg(lhs.strip())
-
-                    if def_var:
-                        self.reg_def[block_id].add(def_var)
-
-                    uses = reg_pattern.findall(rhs)
-                    for u in uses:
-                        u_norm = self._normalize_reg(u)
-                        if u_norm:
-                            self.reg_use[block_id].add(u_norm)
-
-                else:
-                    uses = reg_pattern.findall(inst)
-                    for u in uses:
-                        u_norm = self._normalize_reg(u)
-                        if u_norm:
-                            self.reg_use[block_id].add(u_norm)
-
-    def _compute_in_out(self):
-        """
-        Optimized dataflow analysis using worklist
-        """
-
-        # 初始化
-        for b in range(len(self.basic_blocks)):
-            self.reg_in[b] = set()
-            self.reg_out[b] = set()
-
-        work_list = list(range(len(self.basic_blocks)))
-
-        while work_list:
-            b = work_list.pop()
-
-            old_in = self.reg_in[b].copy()
-            old_out = self.reg_out[b].copy()
-
-            # ---- OUT[b] ----
-            new_out = set()
-            for succ in self.cfg.get(b, []):
-                new_out |= self.reg_in[succ]
-
-            self.reg_out[b] = new_out
-
-            # ---- IN[b] ----
-            self.reg_in[b] = self.reg_use[b] | (self.reg_out[b] - self.reg_def[b])
-
-            # ---- 如果变化，加入前驱 ----
-            if self.reg_in[b] != old_in or self.reg_out[b] != old_out:
-                for pred in self._get_predecessors(b):
-                    if pred not in work_list:
-                        work_list.append(pred)
-
-    def _get_predecessors(self, block_id):
-        pre = []
-        for b, success in self.cfg.items():
-            if block_id in success:
-                pre.append(b)
-        return pre
-
-
-    def _estimate_registers_precise(self):
-        max_reg = 0
-        for b, block in enumerate(self.basic_blocks):
-            live = set(self.reg_out[b])
-
-            # 当前 block 内的峰值
-            peak = len(live)
-
-            # 逆序扫描（关键：liveness 是 backward）
-            for inst in reversed(block):
-                # Step 1: 处理 DEF（先删除）
-                if "=" in inst:
-                    lhs, _ = inst.split("=", 1)
-
-                    # 提取定义的寄存器
-                    def_var = self._normalize_reg(lhs.strip())
-
-                    if def_var is not None:
-                        # 向前看，这个值还没被定义 → 不应该 live
-                        live.discard(int(def_var))
-
-                # Step 2: 处理 USE（再加入）
-                uses = re.findall(r"%\d+", inst)
+                # 提取这一行的使用情况
+                uses = self._get_uses_from_inst(inst)
                 for u in uses:
-                    u_norm = self._normalize_reg(u)
-                    if u_norm is not None:
-                        live.add(int(u_norm))
+                    # 如果该变量在块内还没被定义就被使用了，它是入口活跃的（USE 集合）
+                    if u not in defined_in_block:
+                        used_in_block.add(u)
 
-                if len(live) > peak:
-                    peak = len(live)
+                # 提取这一行的定义情况
+                d = self._get_def_from_inst(inst)
+                if d:
+                    defined_in_block.add(d)
 
-            if peak > max_reg:
-                max_reg = peak
+            self.reg_use[block_id] = used_in_block
+            self.reg_def[block_id] = defined_in_block
 
-        return max_reg
+    def _estimate_registers_precise(self) -> int:
+        """
+        精确估算寄存器压力：基于 Live-Out 集合进行逆序行扫描
+        """
+        max_reg_peak = 0
+
+        for b_idx, block in enumerate(self.basic_blocks):
+            # 初始活跃集合为块出口的存活变量
+            current_live = set(self.reg_out[b_idx])
+
+            # 初始峰值（边界处）
+            block_peak = len(current_live)
+
+            # 从后往前扫描每一行指令
+            for inst in reversed(block):
+                # 1. 移除在此行被定义的寄存器（它在这一行之前是死的）
+                d = self._get_def_from_inst(inst)
+                if d:
+                    current_live.discard(d)
+
+                # 2. 加入在此行被使用的寄存器（它从这一行向上开始存活）
+                uses = self._get_uses_from_inst(inst)
+                for u in uses:
+                    current_live.add(u)
+
+                # 3. 更新该块内的瞬时压力峰值
+                block_peak = max(block_peak, len(current_live))
+
+            # 更新全局峰值
+            max_reg_peak = max(max_reg_peak, block_peak)
+
+        return max_reg_peak
 
     def _debug_pressure(self):
-        print(self.cfg)
+        """
+        打印调试信息，检查每个块的活跃度
+        """
+        print("\n[Register Pressure Debug]")
         for b in range(len(self.basic_blocks)):
-            live = self.reg_in[b] | self.reg_out[b]
+            # 这里的 LIVE 应该理解为“经过该块的活跃变量”
+            # 为了更准，我们打印入口和出口的数量
+            in_set = self.reg_in[b]
+            out_set = self.reg_out[b]
+            print(f"Block {b}: IN={len(in_set)}, OUT={len(out_set)}, DEF={len(self.reg_def[b])}")
 
-            print(
-                f"Block {b}: "
-                f"USE={self.reg_use[b]} "
-                f"DEF={self.reg_def[b]} "
-                f"LIVE={len(live)}"
-            )
