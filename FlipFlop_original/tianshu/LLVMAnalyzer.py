@@ -18,7 +18,11 @@ class LLVMAnalyzer:
     """
 
     def __init__(self, llvm_code: str, arch, block_x: int, block_y: int, config: dict = None, kernel_param:dict = None):
-        self.llvm_code = self._preprocess_llvm(llvm_code,kernel_param)
+        self.kernel_part_name = self._generate_mangled_name(
+            kernel_param["template_param"],
+            kernel_param["data_type"]
+        )
+        self.llvm_code = self._preprocess_llvm(llvm_code,self.kernel_part_name)
         self.arch = arch
         self.block_x = block_x
         self.block_y = block_y
@@ -49,6 +53,9 @@ class LLVMAnalyzer:
         # 正则表达式
         self._prepare_regex()
 
+        # llvm分析
+        self.llvm_analysis:list[str] = []
+
         self.reg_use:Dict[int,set[str]] = defaultdict(set)
         self.reg_def:Dict[int,set[str]] = defaultdict(set)
         self.reg_in:Dict[int,set[str]] = defaultdict(set)
@@ -65,7 +72,10 @@ class LLVMAnalyzer:
         self.re_barrier = re.compile(r"llvm\.nvvm\.barrier0")
 
     def analyze(self):
-        self._prepare_regex()
+        self._extract_kernel_analyses(self.kernel_part_name)
+        for line in self.llvm_analysis:
+            print(line)
+
         self._build_label_map()
         self._split_basic_blocks()
         self._connect_blocks()
@@ -83,8 +93,6 @@ class LLVMAnalyzer:
         total_compute = inst_counts['fpc'] + inst_counts['inc'] + inst_counts['fpc'] + inst_counts['alc']
         total_insts = (mem_coal + mem_un + mem_part +
                        inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
-
-
         self._debug_pressure()
 
         from gpu_common import KernelAnalysis
@@ -141,14 +149,8 @@ class LLVMAnalyzer:
         # 组装完整的函数名前缀（匹配 define @ 后的内容）
         return f"{mangled}{final_types}"
 
-    def _preprocess_llvm(self, raw_llvm_code: str, kernel_param: dict) -> List[str]:
+    def _preprocess_llvm(self, raw_llvm_code: str, target_fingerprint: str) -> List[str]:
         # 1. 生成精准的部分匹配指纹
-        target_fingerprint = self._generate_mangled_name(
-            kernel_param["template_param"],
-            kernel_param["data_type"]
-        )
-        print(f"[LLVM] Generated Target Fingerprint: {target_fingerprint}")
-
         # 2. 精准匹配与清洗
         clean_lines = []
         is_extracting = False
@@ -706,3 +708,38 @@ class LLVMAnalyzer:
             out_set = self.reg_out[b]
             print(f"Block {b}: IN={len(in_set)}, OUT={len(out_set)}, DEF={len(self.reg_def[b])}")
 
+    def _extract_kernel_analyses(self,kernel_name:str):
+        """
+            从 LLVM 分析文件中提取特定内核函数的分析块。
+            返回一个 list[str]，每个字符串代表一个函数的完整分析段。
+            """
+        analyses = []
+        current_block = []
+        inside_block = False
+
+        # 匹配 "Classifying expressions for: @" 开头的行
+        start_pattern = "Classifying expressions for: @"
+
+        try:
+            with open("analysis.txt", 'r', encoding='utf-8') as f:
+                for line in f:
+                    if start_pattern in line:
+                        # 如果当前已经在记录一个块，说明遇到了下一个函数的开头
+                        if inside_block:
+                            analyses.append("".join(current_block).strip())
+                            current_block = []
+
+                        inside_block = True
+                        current_block.append(line)
+                    elif inside_block:
+                        # 如果在块内部，则持续收集行
+                        current_block.append(line)
+
+                # 处理最后一个块（文件末尾）
+                if current_block:
+                    analyses.append("".join(current_block).strip())
+
+        except FileNotFoundError:
+            print("错误：找不到文件")
+
+        return analyses
