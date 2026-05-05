@@ -181,7 +181,7 @@ class LLVMAnalyzer:
 
         # 1. 估计寄存器使用数目
         self._build_use_def()
-        self.regs_per_thread = int(self._estimate_registers_precise() * 0.85)
+        self.regs_per_thread = int(self._estimate_registers_precise())
 
         # 2. 统计共享内存
         self.shared_mem_used = self._extract_shm_from_ir()
