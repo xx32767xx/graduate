@@ -508,7 +508,6 @@ class BaseOperatorTest(ABC):
                             test_case.output_count,
                             comparison_target,
                             bench_mode=config.bench,
-                            only_infini=True
                         )
                     )
                     test_result.torch_host_time = torch_host
@@ -653,6 +652,8 @@ class BaseOperatorTest(ABC):
                     test_case.output_count,
                     comparison_target,
                     bench_mode=config.bench,
+                    only_infini=True
+
                 )
             )
             test_result.torch_host_time = torch_host
