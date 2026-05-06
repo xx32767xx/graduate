@@ -22,7 +22,7 @@ class LLVMAnalyzer:
             kernel_param["template_param"],
             kernel_param["data_type"]
         )
-        self.llvm_code = self._preprocess_llvm(llvm_code,self.kernel_part_name)
+        self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
         self.arch = arch
         self.block_x = block_x
         self.block_y = block_y
@@ -50,9 +50,6 @@ class LLVMAnalyzer:
         self.occupancy_factor = 1.0
         self.shared_bank_conflict_factor = 1.0
 
-        # 正则表达式
-        self._prepare_regex()
-
         # llvm分析
         self.llvm_analysis:list[str] = []
 
@@ -62,26 +59,21 @@ class LLVMAnalyzer:
         self.reg_out:Dict[int,set[str]] = defaultdict(set)
 
 
-    def _prepare_regex(self):
-        # 匹配函数入口 (Kernel 定义)
-        self.re_entry = re.compile(r"define.*iluvatar_kernel.*@([\w_]+)")
-        # 匹配基本块标签
-        self.re_label = re.compile(r"^([\w.]+):", re.MULTILINE)
-        # 匹配内建函数 (ThreadIdx, Barrier 等)
-        self.re_tid_x = re.compile(r"llvm\.nvvm\.read\.ptx\.sreg\.tid\.x")
-        self.re_barrier = re.compile(r"llvm\.nvvm\.barrier0")
-
     def analyze(self):
+        print(self.kernel_part_name)
         self._extract_kernel_analyses(self.kernel_part_name)
-        for line in self.llvm_analysis:
-            print(line)
 
         self._build_label_map()
+        print(self.labels)
+
         self._split_basic_blocks()
         self._connect_blocks()
         self._parse_llvm_resource_usage()
 
         loops = self._detect_loops()
+        loop_info = self._get_loop_info(loops)
+        print(loop_info)
+
         self._calculate_block_weights(loops)
 
         self.occupancy_factor = self._estimate_occupancy_factor()
@@ -149,12 +141,13 @@ class LLVMAnalyzer:
         # 组装完整的函数名前缀（匹配 define @ 后的内容）
         return f"{mangled}{final_types}"
 
-    def _preprocess_llvm(self, raw_llvm_code: str, target_fingerprint: str) -> List[str]:
+    def _preprocess_llvm(self, raw_llvm_code: str, target_fingerprint: str) -> Tuple[List[str], List[str]]:
         # 1. 生成精准的部分匹配指纹
         # 2. 精准匹配与清洗
         clean_lines = []
         is_extracting = False
         raw_lines = raw_llvm_code.splitlines()
+        params = []
 
         for line in raw_lines:
             # 只有匹配到生成的精准全称才开始提取
@@ -169,6 +162,10 @@ class LLVMAnalyzer:
                 if f"{target_fingerprint}" in line:
                     parts = re.split(r'[\s(),]+', line)
                     if parts[0] == 'define':
+                        param_section_match = re.search(r'\((.*)\)', line, re.DOTALL)
+                        param_section = param_section_match.group(1)
+                        reg_pattern = re.compile(r'%([\w.]+)')
+                        params = reg_pattern.findall(param_section)
                         for p in parts:
                             if f"{target_fingerprint}" in p and p[0] == '@':
                                 is_extracting = True
@@ -177,7 +174,7 @@ class LLVMAnalyzer:
         if not clean_lines:
             raise ValueError(f"Match Failed! Could not find kernel: {target_fingerprint}")
 
-        return clean_lines
+        return clean_lines,params
 
     def _parse_llvm_resource_usage(self):
 
@@ -631,7 +628,7 @@ class LLVMAnalyzer:
         rhs = clean_inst.split("=")[1] if "=" in clean_inst else clean_inst
 
         # 匹配所有 % 开头的寄存器名
-        reg_pattern = re.compile(r"%([\w.]+)")
+        reg_pattern = re.compile(r"%([\w._]+)")
         matches = reg_pattern.findall(rhs)
         return matches
 
@@ -709,12 +706,6 @@ class LLVMAnalyzer:
             print(f"Block {b}: IN={len(in_set)}, OUT={len(out_set)}, DEF={len(self.reg_def[b])}")
 
     def _extract_kernel_analyses(self,kernel_name:str):
-        """
-            从 LLVM 分析文件中提取特定内核函数的分析块。
-            返回一个 list[str]，每个字符串代表一个函数的完整分析段。
-            """
-        analyses = []
-        current_block = []
         inside_block = False
 
         # 匹配 "Classifying expressions for: @" 开头的行
@@ -723,23 +714,70 @@ class LLVMAnalyzer:
         try:
             with open("analysis.txt", 'r', encoding='utf-8') as f:
                 for line in f:
-                    if start_pattern in line:
-                        # 如果当前已经在记录一个块，说明遇到了下一个函数的开头
-                        if inside_block:
-                            analyses.append("".join(current_block).strip())
-                            current_block = []
-
-                        inside_block = True
-                        current_block.append(line)
-                    elif inside_block:
-                        # 如果在块内部，则持续收集行
-                        current_block.append(line)
-
-                # 处理最后一个块（文件末尾）
-                if current_block:
-                    analyses.append("".join(current_block).strip())
+                    if inside_block:
+                        if start_pattern in line:
+                            break
+                        else:
+                            self.llvm_analysis.append(line)
+                    else:
+                        if start_pattern in line and kernel_name in line:
+                            inside_block = True
+                            self.llvm_analysis.append(line)
 
         except FileNotFoundError:
             print("错误：找不到文件")
 
-        return analyses
+    def _get_loop_info(self,loops:List[Tuple[int, int]]):
+        pattern = r"Loop\s+%([\.\w]+):\s+Predicated backedge-taken count is\s+(.*)"
+        res = []
+        for line in self.llvm_analysis:
+            line = line.strip()
+            match = re.search(pattern, line)
+            if match:
+                # 提取两个捕获组
+                label_name = match.group(1)
+                expression = match.group(2)
+
+                # 获取label在的block
+                label_line = self.labels[label_name]
+                label_block_id = self.line_to_block[label_line]
+
+                # 化简表达式
+                flag_removed = re.sub(r'<[a-z]+>', '', expression)
+                conv_pattern = r"\((?:zext|sext|trunc)\s+[\w\d]+\s+([%\.\w\d]+)\s+to\s+[\w\d]+\)"
+                conv_removed = flag_removed
+                while True:
+                    # 将整个转换结构替换为捕获的变量名
+                    new_expr = re.sub(conv_pattern, r"\1", conv_removed)
+                    if new_expr == conv_removed:
+                        break
+                    conv_removed = new_expr
+                op_suffix_pattern = r"([\+\-\*/])[us]\s+"
+                sign_removed = re.sub(op_suffix_pattern, r"\1", conv_removed)
+
+                for loop in loops:
+                    if loop[0] == label_block_id:
+                        res.append({
+                            "loop_id": loop,
+                            "expression": sign_removed
+                        })
+                        break
+
+        return res
+
+
+
+
+if __name__ == "__main__":
+    block_x = 512
+    block_y = 1
+    kernel_param = {
+        "template_param": [1024],
+        "data_type": ["float", "half", "half"]
+    }
+    with open('op.ll', 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    arch = None
+    analyzer = LLVMAnalyzer(content, arch, block_x, block_y, {}, kernel_param)
+    analysis = analyzer.analyze()

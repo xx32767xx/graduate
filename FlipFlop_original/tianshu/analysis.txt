@@ -1251,8 +1251,7 @@ Determining loop execution counts for: @_Z17add_rmsnormKernelILj1024Ef6__halfS0_
 Loop %213: backedge-taken count is ((-1 + (-1 * %.ph) + ((1024 + %.ph) umax %14)) /u 1024)
 Loop %213: constant max backedge-taken count is 18014398509481983
 Loop %213: symbolic max backedge-taken count is ((-1 + (-1 * %.ph) + ((1024 + %.ph) umax %14)) /u 1024)
-Loop %213: Predicated backedge-taken count is ((-1 + (-1 * %.ph) + ((1024 + %.ph) umax %14)) /u 1024)
- Predicates:
+c Predicates:
 Loop %213: Trip multiple is 1
 Loop %182: backedge-taken count is ((-2 + (2 * ((1 + ((-1 + (-1 * (zext i32 %38 to i64))<nsw> + %14) /u 1024))<nuw><nsw> /u 2))<nuw><nsw>)<nsw> /u 2)
 Loop %182: constant max backedge-taken count is 9223372036854775807
@@ -4352,7 +4351,7 @@ Classifying expressions for: @_Z17add_rmsnormKernelILj4096EfffEvPT1_S1_llllPKS0_
   %267 = getelementptr inbounds float, ptr addrspace(1) %37, i64 %266
   -->  {((4 * (zext i32 %38 to i64))<nuw><nsw> + (4 * ((zext i32 %17 to i64) + (-1 * ((zext i32 %17 to i64) /u %13) * %13)) * %5) + (4 * ((zext i32 %17 to i64) /u %13) * %4) + %1),+,16384}<%265> U: full-set S: full-set		Exits: ((4 * (zext i32 %38 to i64))<nuw><nsw> + (16384 * ((-1 + (-1 * (zext i32 %38 to i64))<nsw> + %14) /u 4096)) + (4 * ((zext i32 %17 to i64) + (-1 * ((zext i32 %17 to i64) /u %13) * %13)) * %5) + (4 * ((zext i32 %17 to i64) /u %13) * %4) + %1)		LoopDispositions: { %265: Computable }
   %269 = getelementptr inbounds float, ptr addrspace(1) %12, i64 %266
-  -->  {((4 * (zext i32 %38 to i64))<nuw><nsw> + %12),+,16384}<%265> U: full-set S: full-set		Exits: ((4 * (zext i32 %38 to i64))<nuw><nsw> + (16384 * ((-1 + (-1 * (zext i32 %38 to i64))<nsw> + %14) /u 4096)) + %12)		LoopDispositions: { %265: Computable }
+  -->  {((4 * (zext i32 %38 to i64))<nuw><nsw> + %12),+,16384}<%265> U: full-set S: full-set	ILj1024Ef6__halfS0_	Exits: ((4 * (zext i32 %38 to i64))<nuw><nsw> + (16384 * ((-1 + (-1 * (zext i32 %38 to i64))<nsw> + %14) /u 4096)) + %12)		LoopDispositions: { %265: Computable }
   %273 = getelementptr inbounds float, ptr addrspace(1) %25, i64 %266
   -->  {((4 * (zext i32 %38 to i64))<nuw><nsw> + (4 * ((zext i32 %17 to i64) + (-1 * ((zext i32 %17 to i64) /u %13) * %13)) * %3) + (4 * ((zext i32 %17 to i64) /u %13) * %2) + %0),+,16384}<%265> U: full-set S: full-set		Exits: ((4 * (zext i32 %38 to i64))<nuw><nsw> + (16384 * ((-1 + (-1 * (zext i32 %38 to i64))<nsw> + %14) /u 4096)) + (4 * ((zext i32 %17 to i64) + (-1 * ((zext i32 %17 to i64) /u %13) * %13)) * %3) + (4 * ((zext i32 %17 to i64) /u %13) * %2) + %0)		LoopDispositions: { %265: Computable }
   %274 = add nuw i64 %266, 4096

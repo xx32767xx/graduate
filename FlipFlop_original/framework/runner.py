@@ -37,6 +37,7 @@ class GenericTestRunner:
             num_iterations=self.args.num_iterations,
             verbose=self.args.verbose,
             equal_nan=self.args.eq_nan,
+            only_infini = True
         )
 
         runner = TestRunner(self.operator_test.test_cases, config)

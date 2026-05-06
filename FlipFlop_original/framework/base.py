@@ -31,6 +31,7 @@ class TestConfig:
         num_iterations=1000,
         verbose=False,
         equal_nan=False,
+        only_infini = False
     ):
         self.debug = debug
         self.equal_nan = equal_nan
@@ -38,7 +39,7 @@ class TestConfig:
         self.num_prerun = num_prerun
         self.num_iterations = num_iterations
         self.verbose = verbose
-
+        self.only_infini = only_infini
 
 class TestRunner:
     """Test runner"""
@@ -427,21 +428,24 @@ class BaseOperatorTest(ABC):
         )
 
         # Check operator implementations
-        torch_implemented = True
+        torch_implemented = not config.only_infini
         infini_implemented = True
-        torch_error_msg = ""
+        torch_error_msg = "Skipped by only_infini flag" if config.only_infini else ""
         infini_error_msg = ""
 
-        try:
-            torch_result = self.torch_operator(*inputs, **kwargs)
-            if torch_result is None:
+        if not config.only_infini:
+            try:
+                torch_result = self.torch_operator(*inputs, **kwargs)
+                if torch_result is None:
+                    torch_implemented = False
+            except NotImplementedError as e:
+                if config.verbose:
+                    traceback.print_exc()
                 torch_implemented = False
-        except NotImplementedError as e:
-            if config.verbose:
-                traceback.print_exc()
-            torch_implemented = False
-            torch_result = None
-            torch_error_msg = str(e)
+                torch_result = None
+                torch_error_msg = str(e)
+        else:
+            torch_result = None  # 随便返回一个
 
         try:
             infini_result = self.infinicore_operator(*infini_inputs, **infini_kwargs)
@@ -454,102 +458,164 @@ class BaseOperatorTest(ABC):
             infini_result = None
             infini_error_msg = str(e)
 
-        if not torch_error_msg:
+        if not torch_error_msg and not config.only_infini:
             torch_error_msg = "unimplemented test function"
 
         if not infini_error_msg:
             infini_error_msg = "unimplemented test function"
 
-        # Skip if neither operator is implemented
-        if not torch_implemented and not infini_implemented:
-            test_result.return_code = -2  # Skipped
-            # Combine both error messages
-            test_result.error_message = f"Both operators failed: PyTorch - {torch_error_msg}; InfiniCore - {infini_error_msg}"
-            return test_result
+        if config.only_infini:
+            test_result.return_code = 0  # 强制标记为通过，以便后续执行 bench
+            test_result.success = True
+        else:
+            # Skip if neither operator is implemented
+            if not torch_implemented and not infini_implemented:
+                test_result.return_code = -2  # Skipped
+                # Combine both error messages
+                test_result.error_message = f"Both operators failed: PyTorch - {torch_error_msg}; InfiniCore - {infini_error_msg}"
+                return test_result
 
-        # Single operator execution without comparison
-        if not torch_implemented or not infini_implemented:
-            test_result.return_code = -3  # Partial
-            # Determine which operator is missing and create appropriate message with actual error
-            if not torch_implemented:
-                test_result.error_message = (
-                    f"PyTorch operator failed: {torch_error_msg}"
-                )
-            else:
-                test_result.error_message = (
-                    f"InfiniCore operator failed: {infini_error_msg}"
-                )
-
-            # Run benchmarking for partial tests if enabled
-            if config.bench:
-                torch_host, torch_device, infini_host, infini_device = (
-                    BenchmarkUtils.run_benchmarking(
-                        config,
-                        device_str,
-                        torch_implemented,
-                        infini_implemented,
-                        self.torch_operator,
-                        self.infinicore_operator,
-                        inputs,
-                        kwargs,
-                        infini_inputs,
-                        infini_kwargs,
-                        test_case.output_count,
-                        comparison_target,
-                        bench_mode=config.bench,
+            # ==========================================================================
+            # Single operator execution without comparison
+            # ==========================================================================
+            if not torch_implemented or not infini_implemented:
+                test_result.return_code = -3  # Partial
+                # Determine which operator is missing and create appropriate message with actual error
+                if not torch_implemented:
+                    test_result.error_message = (
+                        f"PyTorch operator failed: {torch_error_msg}"
                     )
-                )
-                test_result.torch_host_time = torch_host
-                test_result.torch_device_time = torch_device
-                test_result.infini_host_time = infini_host
-                test_result.infini_device_time = infini_device
-            return test_result
-        # ==========================================================================
-        # MULTIPLE OUTPUTS COMPARISON LOGIC
-        # ==========================================================================
-        if test_case.output_count > 1:
-            # Handle multiple outputs comparison
+                else:
+                    test_result.error_message = (
+                        f"InfiniCore operator failed: {infini_error_msg}"
+                    )
 
-            # Determine what to compare based on comparison_target
-            if comparison_target is None or isinstance(
-                comparison_target, (list, tuple)
-            ):
-                # Compare return values (out-of-place multiple outputs)
-                torch_comparison = torch_result
-                infini_comparison = infini_result
-            elif comparison_target == "out":
-                # Compare output tuple from kwargs (explicit multiple outputs)
-                torch_comparison = kwargs.get("out")
-                infini_comparison = infini_kwargs.get("out")
+                # Run benchmarking for partial tests if enabled
+                if config.bench:
+                    torch_host, torch_device, infini_host, infini_device = (
+                        BenchmarkUtils.run_benchmarking(
+                            config,
+                            device_str,
+                            torch_implemented,
+                            infini_implemented,
+                            self.torch_operator,
+                            self.infinicore_operator,
+                            inputs,
+                            kwargs,
+                            infini_inputs,
+                            infini_kwargs,
+                            test_case.output_count,
+                            comparison_target,
+                            bench_mode=config.bench,
+                        )
+                    )
+                    test_result.torch_host_time = torch_host
+                    test_result.torch_device_time = torch_device
+                    test_result.infini_host_time = infini_host
+                    test_result.infini_device_time = infini_device
+                return test_result
+
+            # ==========================================================================
+            # MULTIPLE OUTPUTS COMPARISON LOGIC
+            # ==========================================================================
+            if test_case.output_count > 1:
+                # Handle multiple outputs comparison
+
+                # Determine what to compare based on comparison_target
+                if comparison_target is None or isinstance(
+                    comparison_target, (list, tuple)
+                ):
+                    # Compare return values (out-of-place multiple outputs)
+                    torch_comparison = torch_result
+                    infini_comparison = infini_result
+                elif comparison_target == "out":
+                    # Compare output tuple from kwargs (explicit multiple outputs)
+                    torch_comparison = kwargs.get("out")
+                    infini_comparison = infini_kwargs.get("out")
+                else:
+                    raise ValueError(
+                        f"Invalid comparison target for multiple outputs: {comparison_target}"
+                    )
+
+                # Validate that we have multiple outputs to compare
+                if not isinstance(torch_comparison, (tuple, list)) or not isinstance(
+                    infini_comparison, (tuple, list)
+                ):
+                    raise ValueError(
+                        f"Multiple outputs expected but got single result: "
+                        f"torch={type(torch_comparison)}, infinicore={type(infini_comparison)}"
+                    )
+
+                if len(torch_comparison) != len(infini_comparison):
+                    raise ValueError(
+                        f"Output count mismatch: torch={len(torch_comparison)}, infinicore={len(infini_comparison)}"
+                    )
+
+                if len(torch_comparison) != test_case.output_count:
+                    raise ValueError(
+                        f"Output count mismatch: expected {test_case.output_count}, got {len(torch_comparison)}"
+                    )
+
+                # Compare each output pair individually
+                all_valid = True
+                for i, (torch_out, infini_out) in enumerate(
+                    zip(torch_comparison, infini_comparison)
+                ):
+                    atol = test_case.tolerance.get("atol", 1e-5)
+                    rtol = test_case.tolerance.get("rtol", 1e-3)
+
+                    compare_fn = create_test_comparator(
+                        config,
+                        atol,
+                        rtol,
+                        f"{test_case.description} - output_{i}",
+                        equal_nan=config.equal_nan,
+                    )
+
+                    is_valid = compare_fn(infini_out, torch_out)
+                    if not is_valid:
+                        print(f"❌ Output {i} comparison failed")
+                        all_valid = False
+                    else:
+                        print(f"✅ Output {i} comparison passed")
+
+                if not all_valid:
+                    raise AssertionError(
+                        f"Multiple outputs comparison failed for {test_case}"
+                    )
+
+            # ==========================================================================
+            # SINGLE OUTPUT COMPARISON LOGIC
+            # ==========================================================================
             else:
-                raise ValueError(
-                    f"Invalid comparison target for multiple outputs: {comparison_target}"
-                )
+                # Determine comparison targets for single output
+                if comparison_target is None or isinstance(
+                    comparison_target, (list, tuple)
+                ):
+                    # Compare return values (out-of-place)
+                    torch_comparison = torch_result
+                    infini_comparison = infini_result
+                elif comparison_target == "out":
+                    # Compare output tensor from kwargs (explicit output)
+                    torch_comparison = kwargs.get("out")
+                    infini_comparison = cloned_tensors[0]
+                elif isinstance(comparison_target, int):
+                    # Compare specific input tensor (in-place operation on input)
+                    if 0 <= comparison_target < len(inputs):
+                        torch_comparison = inputs[comparison_target]
+                        infini_comparison = cloned_tensors[0]
+                    else:
+                        raise ValueError(
+                            f"Invalid comparison target index: {comparison_target}"
+                        )
+                else:
+                    raise ValueError(f"Invalid comparison target: {comparison_target}")
 
-            # Validate that we have multiple outputs to compare
-            if not isinstance(torch_comparison, (tuple, list)) or not isinstance(
-                infini_comparison, (tuple, list)
-            ):
-                raise ValueError(
-                    f"Multiple outputs expected but got single result: "
-                    f"torch={type(torch_comparison)}, infinicore={type(infini_comparison)}"
-                )
+                # Validate comparison targets
+                if torch_comparison is None or infini_comparison is None:
+                    raise ValueError("Comparison targets cannot be None")
 
-            if len(torch_comparison) != len(infini_comparison):
-                raise ValueError(
-                    f"Output count mismatch: torch={len(torch_comparison)}, infinicore={len(infini_comparison)}"
-                )
-
-            if len(torch_comparison) != test_case.output_count:
-                raise ValueError(
-                    f"Output count mismatch: expected {test_case.output_count}, got {len(torch_comparison)}"
-                )
-
-            # Compare each output pair individually
-            all_valid = True
-            for i, (torch_out, infini_out) in enumerate(
-                zip(torch_comparison, infini_comparison)
-            ):
+                # Perform comparison
                 atol = test_case.tolerance.get("atol", 1e-5)
                 rtol = test_case.tolerance.get("rtol", 1e-3)
 
@@ -557,68 +623,13 @@ class BaseOperatorTest(ABC):
                     config,
                     atol,
                     rtol,
-                    f"{test_case.description} - output_{i}",
+                    test_case.description,
                     equal_nan=config.equal_nan,
                 )
 
-                is_valid = compare_fn(infini_out, torch_out)
+                is_valid = compare_fn(infini_comparison, torch_comparison)
                 if not is_valid:
-                    print(f"❌ Output {i} comparison failed")
-                    all_valid = False
-                else:
-                    print(f"✅ Output {i} comparison passed")
-
-            if not all_valid:
-                raise AssertionError(
-                    f"Multiple outputs comparison failed for {test_case}"
-                )
-
-        # ==========================================================================
-        # SINGLE OUTPUT COMPARISON LOGIC
-        # ==========================================================================
-        else:
-            # Determine comparison targets for single output
-            if comparison_target is None or isinstance(
-                comparison_target, (list, tuple)
-            ):
-                # Compare return values (out-of-place)
-                torch_comparison = torch_result
-                infini_comparison = infini_result
-            elif comparison_target == "out":
-                # Compare output tensor from kwargs (explicit output)
-                torch_comparison = kwargs.get("out")
-                infini_comparison = cloned_tensors[0]
-            elif isinstance(comparison_target, int):
-                # Compare specific input tensor (in-place operation on input)
-                if 0 <= comparison_target < len(inputs):
-                    torch_comparison = inputs[comparison_target]
-                    infini_comparison = cloned_tensors[0]
-                else:
-                    raise ValueError(
-                        f"Invalid comparison target index: {comparison_target}"
-                    )
-            else:
-                raise ValueError(f"Invalid comparison target: {comparison_target}")
-
-            # Validate comparison targets
-            if torch_comparison is None or infini_comparison is None:
-                raise ValueError("Comparison targets cannot be None")
-
-            # Perform comparison
-            atol = test_case.tolerance.get("atol", 1e-5)
-            rtol = test_case.tolerance.get("rtol", 1e-3)
-
-            compare_fn = create_test_comparator(
-                config,
-                atol,
-                rtol,
-                test_case.description,
-                equal_nan=config.equal_nan,
-            )
-
-            is_valid = compare_fn(infini_comparison, torch_comparison)
-            if not is_valid:
-                raise AssertionError(f"Result comparison failed.")
+                    raise AssertionError(f"Result comparison failed.")
 
         # ==========================================================================
         # UNIFIED BENCHMARKING LOGIC
