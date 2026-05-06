@@ -163,6 +163,7 @@ class BenchmarkUtils:
         output_count,
         comparison_target,
         bench_mode="both",
+        only_infini=False,
     ):
         """
         Unified benchmarking logic with timing accumulation
@@ -190,12 +191,12 @@ class BenchmarkUtils:
         device_time = bench_mode in ["device", "both"]
 
         # Initialize timing variables
-        torch_host_time = 0.0
-        torch_device_time = 0.0
+        torch_host_time = 1.0
+        torch_device_time = 1.0
         infini_host_time = 0.0
         infini_device_time = 0.0
 
-        if torch_implemented:
+        if torch_implemented and not only_infini:
             if output_count > 1:
                 # For multiple outputs, just call the operator
                 def torch_op():
@@ -229,6 +230,7 @@ class BenchmarkUtils:
             )
             torch_host_time = torch_host
             torch_device_time = torch_device
+
 
         if infini_implemented:
             if comparison_target is None:

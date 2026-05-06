@@ -508,6 +508,7 @@ class BaseOperatorTest(ABC):
                             test_case.output_count,
                             comparison_target,
                             bench_mode=config.bench,
+                            only_infini=True
                         )
                     )
                     test_result.torch_host_time = torch_host
@@ -636,6 +637,7 @@ class BaseOperatorTest(ABC):
         # UNIFIED BENCHMARKING LOGIC
         # ==========================================================================
         if config.bench:
+            print("is bench!")
             torch_host, torch_device, infini_host, infini_device = (
                 BenchmarkUtils.run_benchmarking(
                     config,
