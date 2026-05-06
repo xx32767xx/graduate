@@ -433,6 +433,7 @@ class BaseOperatorTest(ABC):
         torch_error_msg = "Skipped by only_infini flag" if config.only_infini else ""
         infini_error_msg = ""
 
+        print(config.only_infini,"??????/")
         if not config.only_infini:
             try:
                 torch_result = self.torch_operator(*inputs, **kwargs)
