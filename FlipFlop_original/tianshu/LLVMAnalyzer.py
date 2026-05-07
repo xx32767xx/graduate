@@ -563,7 +563,7 @@ class LLVMAnalyzer:
                     if any(is_from_tid(r) for r in addr_regs):
                         stride1_count += 1
 
-        return 1.0 - (stride1_count / total_mem_ops) if total_mem_ops > 0 else 0.0
+        return (stride1_count / total_mem_ops) if total_mem_ops > 0 else 0.0
 
     def _coalescing_breakdown(self, global_ops: float) -> Tuple[float, float, float, int, int]:
         """
@@ -599,10 +599,9 @@ class LLVMAnalyzer:
                 uncoal_per_mw = max(1, math.ceil(warp_size * stride_factor * avg_element_size / cache_line_size))
 
         # 计算合并/非合并的指令数分配
-        mem_coal = global_ops * (1.0 - stride_factor)
-        mem_uncoal = global_ops * stride_factor
+        mem_coal = global_ops * stride_factor
+        mem_uncoal = global_ops * (1 - stride_factor)
         mem_partial = 0.0
-
         estimated_stride = 1.0 if stride_factor == 0 else (1.0 / (1.0 - stride_factor + 1e-6))
         transactions = math.ceil(warp_size * estimated_stride * avg_element_size / cache_line_size)
         print(f"[Coalescing] warp_size={warp_size}, stride={estimated_stride:.2f}, "
