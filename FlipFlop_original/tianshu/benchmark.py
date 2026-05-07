@@ -17,7 +17,7 @@ from FlipFlop_original.framework import BaseOperatorTest, TensorSpec, TestCase, 
 # ==============================================================================
 
 _TEST_CASES_DATA = [
-    ((16, 1024), (16, 1024), (16, 1024), (1024,)),
+    ((16, 4096), (16, 4096), (16, 4096), (4096,)),
 ]
 
 # Tolerance configuration
