@@ -88,6 +88,7 @@ class HongKimExecutionTimeModel:
         # 换算访存延迟单位到秒
         lat_coal   = self.Mem_coal_ns   * 1e-9
         lat_uncoal = self.Mem_uncoal_ns * 1e-9
+
         lat_part   = self.Mem_partial_ns* 1e-9
         lat_shared = self.Mem_shared_ns * 1e-9
         lat_local  = self.Mem_local_ns  * 1e-9
@@ -134,8 +135,8 @@ class HongKimExecutionTimeModel:
             w_coal = mem_coal/global_count
             w_un   = mem_uncoal/global_count
             w_part = mem_part/global_count
-            dd_global = (w_coal*self.Dep_coal_s * self.analysis.uncoal_transactions_per_warp
-                       + w_un  *self.Dep_uncoal_s * self.analysis.coal_transactions_per_warp
+            dd_global = (w_coal*self.Dep_coal_s * self.analysis.coal_transactions_per_warp
+                       + w_un  *self.Dep_uncoal_s * self.analysis.uncoal_transactions_per_warp
                        + w_part*self.Dep_part_s)
         else:
             dd_global=0.0
