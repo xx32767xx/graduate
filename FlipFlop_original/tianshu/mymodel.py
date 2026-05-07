@@ -13,6 +13,7 @@ if __name__ == "__main__":
         content = f.read()
 
     arch = GPUArchitecture(device_id = 0, calibration_file="calibration.json")
+    print(arch.attrs)
 
     analyzer = LLVMAnalyzer(content, arch, block_x, block_y, {}, kernel_param)
     analysis = analyzer.analyze()

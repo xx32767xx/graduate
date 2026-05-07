@@ -88,6 +88,7 @@ class LLVMAnalyzer:
 
         loops = self._detect_loops()
         loop_info = self._get_loop_info(loops)
+        print(loop_info)
         self._calculate_block_weights(loops)
 
         self.occupancy_factor = self._estimate_occupancy_factor()
