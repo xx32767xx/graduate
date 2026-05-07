@@ -3,10 +3,10 @@ from time_model import HongKimExecutionTimeModel
 from LLVMAnalyzer import LLVMAnalyzer
 
 if __name__ == "__main__":
-    block_x = 512
+    block_x = 4096
     block_y = 1
     kernel_param = {
-        "template_param": [1024],
+        "template_param": [4096],
         "data_type": ["float", "half", "half"]
     }
     with open('op.ll', 'r', encoding='utf-8') as f:
