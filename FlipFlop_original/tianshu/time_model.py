@@ -62,7 +62,8 @@ class HongKimExecutionTimeModel:
 
         warp_size = self.arch.attrs.get('WARP_SIZE', 32)
         threads_per_block = bx * by
-        warps_per_block   = (threads_per_block + warp_size - 1) // warp_size
+        # warps_per_block   = (threads_per_block + warp_size - 1) // warp_size
+        warps_per_block = 32
         total_warps       = total_blocks * warps_per_block
 
         # 访存指令
