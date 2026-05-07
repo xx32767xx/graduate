@@ -86,13 +86,13 @@ class HongKimExecutionTimeModel:
         sync_count = float(self.analysis.synch_insts)
 
         # 换算访存延迟单位到秒
-        lat_coal   = self.Mem_coal_ns   * 1e-9
-        lat_uncoal = self.Mem_uncoal_ns * 1e-9
-
-        lat_part   = self.Mem_partial_ns* 1e-9
+        lat_uncoal = (self.Mem_uncoal_ns * 1e-9
+                      + (self.Dep_uncoal_s - 1) * self.Dep_uncoal_s)
+        lat_coal = (self.Mem_coal_ns * 1e-9
+                    + (self.Dep_coal_s - 1) * self.Dep_coal_s)
+        lat_part = self.Mem_partial_ns * 1e-9
         lat_shared = self.Mem_shared_ns * 1e-9
-        lat_local  = self.Mem_local_ns  * 1e-9
-
+        lat_local = self.Mem_local_ns * 1e-9
         # 计算显存访存延迟
         if global_count > 1e-9:
             global_lat = (
