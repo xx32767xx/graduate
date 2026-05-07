@@ -124,11 +124,7 @@ class KernelAnalysis:
     total_insts: int
     registers_per_thread: int
     shared_mem_bytes: int
-    uncoal_transactions_per_warp: int
-    coal_transactions_per_warp: int
     block_x: int = 0
     block_y: int = 0
-
-
 
 
