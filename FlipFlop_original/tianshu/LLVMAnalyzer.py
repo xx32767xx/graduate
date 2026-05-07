@@ -95,7 +95,7 @@ class LLVMAnalyzer:
         self.shared_bank_conflict_factor = self._estimate_shared_bank_conflicts()
 
         inst_counts = self._accumulate_kernel_totals()
-        mem_coal, mem_un, mem_part, coal_per_mw, uncoal_per_mw = self._coalescing_breakdown(inst_counts['ldg'] + inst_counts['stg'])
+        mem_coal, mem_un, mem_part = self._coalescing_breakdown(inst_counts['ldg'] + inst_counts['stg'])
 
         total_compute = inst_counts['fpc'] + inst_counts['inc'] + inst_counts['fpc'] + inst_counts['alc']
         total_insts = (mem_coal + mem_un + mem_part +
@@ -103,29 +103,8 @@ class LLVMAnalyzer:
         self._debug_pressure()
 
 
-
         from gpu_common import KernelAnalysis
-        analysis1 = KernelAnalysis(
-            mem_coal=0,
-            mem_uncoal=3,  # 2 half load + 1 half store per thread
-            mem_partial=0,
-            local_insts=0,
-            shared_insts=0,  # tid==0 的规约被稀释
-            synch_insts=2,  # 两次 barrier
-            fp_insts=1,  # 0.555 → 取1
-            int_insts=2,  # 1.80 → 取2
-            sfu_insts=0,  # 0.064 → 取0
-            alu_insts=2,  # 2.35 → 取2
-            total_insts=10,  # 3+0+0+2+1+2+0+2
-            registers_per_thread=19,
-            shared_mem_bytes=0,
-            uncoal_transactions_per_warp=uncoal_per_mw,
-            coal_transactions_per_warp=coal_per_mw,
-            block_x=4096,
-            block_y=1
-        )
-
-        turea = KernelAnalysis(
+        return KernelAnalysis(
             mem_coal=int(mem_coal),
             mem_uncoal=int(mem_un),
             mem_partial=int(mem_part),
@@ -139,13 +118,9 @@ class LLVMAnalyzer:
             total_insts=int(total_insts),
             registers_per_thread=self.regs_per_thread,
             shared_mem_bytes=self.shared_mem_used,
-            uncoal_transactions_per_warp=uncoal_per_mw,
-            coal_transactions_per_warp=coal_per_mw,
             block_x=self.block_x,
             block_y=self.block_y
         )
-
-        return analysis1
 
     def _generate_mangled_name(self, template_param: list, data_types: list) -> str:
         """
@@ -565,57 +540,43 @@ class LLVMAnalyzer:
 
         return 1.0 - (stride1_count / total_mem_ops) if total_mem_ops > 0 else 0.0
 
-    def _coalescing_breakdown(self, global_ops: float) -> Tuple[float, float, float, int, int]:
+    def _coalescing_breakdown(self, global_ops: float) -> Tuple[float, float, float]:
         """
-        返回 mem_coal, mem_uncoal, mem_partial, coal_per_mw, uncoal_per_mw
+        基于 LLVM SSA 回溯结果的访存合并分解模型
         """
         if global_ops <= 0:
-            return 0.0, 0.0, 0.0, 1, 1
+            return 0.0, 0.0, 0.0
 
+        # 1. 获取硬件参数
         warp_size = self.arch.attrs.get('WARP_SIZE', 32)
-        cache_line_size = self.arch.attrs.get('CACHE_LINE_SIZE', 128)
+        cache_line_size = self.arch.attrs.get('CACHE_LINE_SIZE', 128)  # 天数智芯通常为 128
+        # warp_size = 32
+        # cache_line_size = 128  # 天数智芯通常为 128
 
-        # 从 LLVM IR 分析实际数据类型大小
-        avg_element_size = self._get_avg_memory_access_size()  # 新增方法，默认 4
-
+        # 2. stride = 0.0 代表 100% 合并，stride = 1.0 代表完全离散
         stride_factor = self._analyze_memory_strides()
-        if stride_factor < 0.01:
-            coal_per_mw = 1
-            uncoal_per_mw = warp_size  # 完全不合并，每线程 1 次事务
-        else:
-            coal_per_mw = 1
-            estimated_stride = 1.0 / (1.0 - stride_factor + 1e-6)
-            uncoal_per_mw = max(1, math.ceil(warp_size * estimated_stride * avg_element_size / cache_line_size))
 
-        # 计算合并/非合并的指令数分配
-        mem_coal = global_ops * (1.0 - stride_factor)
-        mem_uncoal = global_ops * stride_factor
-        mem_partial = 0.0
-
+        # 3. 计算内存事务压力 (Transactions)
+        # 如果 stride_factor 为 0，说明是连续访问，每个 Warp 触发的事务极少
+        # 这里我们假设一个平均步长，用于估算 Transactions 数量
+        # 逻辑：如果是离散访问，transactions 数量会激增
+        avg_element_size = 4  # 默认 float
         estimated_stride = 1.0 if stride_factor == 0 else (1.0 / (1.0 - stride_factor + 1e-6))
         transactions = math.ceil(warp_size * estimated_stride * avg_element_size / cache_line_size)
-        print(f"[Coalescing] warp_size={warp_size}, stride={estimated_stride:.2f}, "
-              f"elem_size={avg_element_size}, cache_line={cache_line_size}, "
-              f"transactions={transactions}")
-        return mem_coal, mem_uncoal, mem_partial, coal_per_mw, 10
 
-    def _get_avg_memory_access_size(self) -> int:
-        """从 LLVM IR 推断平均访存大小（字节）"""
-        # 扫一遍访存指令，看 load/store 的类型
-        type_sizes = {'half': 2, 'float': 4, 'double': 8, 'i32': 4, 'i64': 8}
-        sizes = []
+        # 4. 划分访存类型
+        # 完全合并部分
+        mem_coal = global_ops * (1.0 - stride_factor)
 
-        for block in self.basic_blocks:
-            for ln in block:
-                if "load" in ln or "store" in ln:
-                    for dtype, size in type_sizes.items():
-                        if dtype in ln:
-                            sizes.append(size)
-                            break
+        # 部分合并部分：基于事务数判定
+        # 如果事务数在硬件处理窗口内 (<=8)，则认为具有一定的局部性
+        part_slope = 1.0 if transactions <= 8 else 0.5
+        mem_part = global_ops * stride_factor * part_slope
 
-        if sizes:
-            return sum(sizes) // len(sizes)
-        return 4  # 默认 float
+        # 完全不合并部分
+        mem_un = global_ops - mem_coal - mem_part
+
+        return mem_coal, mem_un, mem_part
 
     def _estimate_occupancy_factor(self) -> float:
         """
