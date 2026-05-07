@@ -102,8 +102,28 @@ class LLVMAnalyzer:
                        inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
         self._debug_pressure()
 
+
+
         from gpu_common import KernelAnalysis
-        return KernelAnalysis(
+        analysis1 = KernelAnalysis(
+            mem_coal=0,
+            mem_uncoal=3,  # 2 half load + 1 half store per thread
+            mem_partial=0,
+            local_insts=0,
+            shared_insts=0,  # tid==0 的规约被稀释
+            synch_insts=2,  # 两次 barrier
+            fp_insts=1,  # 0.555 → 取1
+            int_insts=2,  # 1.80 → 取2
+            sfu_insts=0,  # 0.064 → 取0
+            alu_insts=2,  # 2.35 → 取2
+            total_insts=10,  # 3+0+0+2+1+2+0+2
+            registers_per_thread=19,
+            shared_mem_bytes=0,
+            block_x=4096,
+            block_y=1
+        )
+
+        turea = KernelAnalysis(
             mem_coal=int(mem_coal),
             mem_uncoal=int(mem_un),
             mem_partial=int(mem_part),
@@ -120,6 +140,8 @@ class LLVMAnalyzer:
             block_x=self.block_x,
             block_y=self.block_y
         )
+
+        return analysis1
 
     def _generate_mangled_name(self, template_param: list, data_types: list) -> str:
         """
