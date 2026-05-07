@@ -603,6 +603,11 @@ class LLVMAnalyzer:
         mem_uncoal = global_ops * stride_factor
         mem_partial = 0.0
 
+        estimated_stride = 1.0 if stride_factor == 0 else (1.0 / (1.0 - stride_factor + 1e-6))
+        transactions = math.ceil(warp_size * estimated_stride * avg_element_size / cache_line_size)
+        print(f"[Coalescing] warp_size={warp_size}, stride={estimated_stride:.2f}, "
+              f"elem_size={avg_element_size}, cache_line={cache_line_size}, "
+              f"transactions={transactions}")
         return mem_coal, mem_uncoal, mem_partial, coal_per_mw, uncoal_per_mw
 
     def _get_avg_memory_access_size(self) -> int:
