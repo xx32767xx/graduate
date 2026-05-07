@@ -11,6 +11,12 @@ class InstInfo:
         self.op = op
         self.args = args # 存储用到的寄存器编号列表
 
+    def __str__(self):
+        args = ""
+        for s in self.args:
+            args += s + " "
+        return self.op + " " + args
+
 class LLVMAnalyzer:
     """
     针对天数智芯 (Iluvatar) 的 LLVM IR 性能分析器
@@ -40,6 +46,7 @@ class LLVMAnalyzer:
         self.basic_blocks: List[List[str]] = []
         self.line_to_block: Dict[int, int] = {}
         self.block_weights: Dict[int, int] = {}
+        self.block_probs: Dict[int, float] = {}
         self.reg_map: Dict[str, InstInfo] = {}
 
         self.occupancy_factor = 1.0
@@ -53,6 +60,7 @@ class LLVMAnalyzer:
         # llvm分析
         self.llvm_analysis:list[str] = []
 
+        # 模拟寄存器分配
         self.reg_use:Dict[int,set[str]] = defaultdict(set)
         self.reg_def:Dict[int,set[str]] = defaultdict(set)
         self.reg_in:Dict[int,set[str]] = defaultdict(set)
@@ -67,13 +75,19 @@ class LLVMAnalyzer:
         print(self.labels)
 
         self._split_basic_blocks()
+        print(self.line_to_block)
         self._connect_blocks()
         self._parse_llvm_resource_usage()
 
+        for b_idx in range(len(self.basic_blocks)):
+            # 这里提前构建寄存器图
+            self._count_block_insts(b_idx)
+
+        self._analyze_branch_conditions()
+        print(self.block_probs)
+
         loops = self._detect_loops()
         loop_info = self._get_loop_info(loops)
-        print(loop_info)
-
         self._calculate_block_weights(loops)
 
         self.occupancy_factor = self._estimate_occupancy_factor()
@@ -276,7 +290,7 @@ class LLVMAnalyzer:
             # 情况 C: 返回指令 (没有后续)
             elif "ret" in last_inst:
                 pass
-
+            print(f"building: {bid} {successors}")
             self.cfg[bid] = successors
 
     def _detect_loops(self) -> List[Tuple[int, int]]:
@@ -363,7 +377,7 @@ class LLVMAnalyzer:
         计算每个基本块的执行权重，自动处理嵌套循环。
         """
         # 1. 初始化每个块的权重为 1
-        self.block_weights = {bid: 1 for bid in range(len(self.basic_blocks))}
+        self.block_weights = {bid: self.block_probs[bid] for bid in range(len(self.basic_blocks))}
 
         # 2. 识别所有循环及其对应的迭代次数
         loop_iters = self._estimate_loop_iterations(loops)  # 返回 {head: count}
@@ -441,7 +455,18 @@ class LLVMAnalyzer:
                 if "read.ptx.sreg.tid.x" in orig_ln:
                     self.reg_map[res_reg] = InstInfo("tid_get", [])
                 else:
-                    args = [p.replace('%', '').strip(',') for p in parts[3:] if p.startswith('%')]
+                    # 提取所有操作数：%寄存器 + 纯数字
+                    args = []
+                    for p in parts[3:]:
+                        cleaned = p.strip(',')
+                        if cleaned.startswith('%'):
+                            args.append(cleaned.replace('%', ''))
+                        elif cleaned.lstrip('-').isdigit():  # 匹配 0, 1, -1, 4096 等
+                            args.append(cleaned)
+                        elif cleaned.startswith('0x'):  # 匹配 0x3810000000000000 等十六进制
+                            args.append(cleaned)
+                    # 注意：这里仍然没有存 float 字面量（如 0.000000e+00）
+                    # 但对于分支条件分析来说，float 比较不会直接出现在 br i1 的条件中
                     self.reg_map[res_reg] = InstInfo(op, args)
 
                 if op == 'load':
@@ -767,12 +792,200 @@ class LLVMAnalyzer:
 
 
 
+#============================
+
+    def _analyze_branch_conditions(self):
+        """
+        分析每个基本块的分支条件，返回每个块的执行概率因子。
+        - 1.0：所有线程/Warp 都执行
+        - 1/block_size：只有 tid=0 执行
+        - 1/warp_count：只有单个 Warp 执行
+        - 0.0：死代码
+        """
+        # 初始化所有块的概率为 1.0
+        self.block_probs = {bid: 1.0 for bid in range(len(self.basic_blocks))}
+
+        block_size = self.block_x * self.block_y  # 总线程数
+        warp_size = self.arch.attrs.get('WARP_SIZE', 32) if self.arch else 32
+        warp_count = block_size // warp_size if block_size > 0 else 1
+
+        # 1. 找到 tid.x 的寄存器名
+        tid_reg = None
+        for reg, info in self.reg_map.items():
+            if info.op == 'tid_get':
+                tid_reg = reg
+                break
+
+        if not tid_reg:
+            print("wtf?")
+            return
+        print(tid_reg)
+
+        # 2. 提取所有条件分支的目标块及其条件
+        for bid, successors in self.cfg.items():
+            if len(successors) != 2:
+                continue  # 非条件分支，跳过
+
+            block = self.basic_blocks[bid]
+            last_inst = block[-1] if block else ""
+
+            if "br i1" not in last_inst:
+                continue
+
+            # 提取条件寄存器：br i1 %cond, label %A, label %B
+            match = re.search(r"br i1 %([\w.]+)\s*,\s*label %([\w.]+)\s*,\s*label %([\w.]+)", last_inst)
+            if not match:
+                continue
+
+            cond_reg = match.group(1)
+            true_label = match.group(2)
+            false_label = match.group(3)
+
+            true_bid = self.line_to_block.get(self.labels.get(true_label) + 1, -1)
+            false_bid = self.line_to_block.get(self.labels.get(false_label) + 1, -1)
+
+            if true_bid == -1 or false_bid == -1:
+                continue
+
+            # 3. 反向追溯条件寄存器，判断条件类型
+            cond_info = self._analyze_condition_type(cond_reg, tid_reg)
+            print(cond_info,bid)
+
+            if cond_info["type"] == "tid_equals_zero":
+                # tid == 0：只有 1 个线程执行 true 分支
+                # true 分支概率 = 1/block_size
+                self._propagate_prob(true_bid, 1.0 / block_size)
+                self._propagate_prob(false_bid, 1.0 - 1.0 / block_size)
+
+            elif cond_info["type"] == "tid_less_than_bound":
+                # tid < bound：部分线程执行
+                bound = cond_info.get("bound", block_size)
+                ratio = min(1.0, bound / block_size)
+                self._propagate_prob(true_bid, ratio)
+                self._propagate_prob(false_bid, 1.0 - ratio)
+
+            elif cond_info["type"] == "all_threads":
+                # 条件不依赖 tid，所有线程走同一路径（循环边界等）
+                # 不修改概率
+                pass
+
+        # 4. 对于没有前驱的块（入口块），概率保持 1.0
+        # 对于可达性低的块，概率为到达它的所有路径概率之和（取 max）
+        self._resolve_prob_conflicts()
+
+    def _analyze_condition_type(self, cond_reg: str, tid_reg: str) -> dict:
+        """
+        反向追溯条件寄存器，判断条件类型。
+        返回 {"type": str, "bound": int(可选)}
+        """
+        if cond_reg not in self.reg_map:
+            return {"type": "unknown"}
+
+        info = self.reg_map[cond_reg]
+        print(info)
+
+        # tid == 0 的模式：icmp eq tid, 0
+        if info.op == "icmp" and len(info.args) >= 2:
+            arg0, arg1 = info.args[0], info.args[1]
+
+            # 检查是否 tid == 0
+            if (arg0 == tid_reg and arg1 == "0") or (arg1 == tid_reg and arg0 == "0"):
+                # 确认是 eq 指令
+                return {"type": "tid_equals_zero"}
+
+            # 检查是否 tid < N（常见模式：icmp ult %tid, %N）
+            if arg0 == tid_reg and arg1.isdigit():
+                return {"type": "tid_less_than_bound", "bound": int(arg1)}
+            if arg1 == tid_reg and arg0.isdigit():
+                # 需要检查比较方向：N > tid 等价于 tid < N
+                return {"type": "tid_less_than_bound", "bound": int(arg0)}
+
+        # 循环条件（如 icmp ult %iv, %bound）→ 所有线程一致
+        if info.op == "icmp":
+            return {"type": "all_threads"}
+
+        return {"type": "unknown"}
+
+    def _propagate_prob(self, bid: int, prob: float):
+        """
+        将概率向下游传播：块的概率 = min(当前概率, 新概率)
+        （取交集，因为多个入口路径时，概率取最严格的那个）
+        """
+        if bid >= len(self.basic_blocks):
+            return
+
+        old_prob = self.block_probs.get(bid, 1.0)
+        self.block_probs[bid] = min(old_prob, prob)
+
+        # 向所有后继传播
+        visited = set()
+        self._dfs_propagate(bid, prob, visited)
+
+
+    def _dfs_propagate(self, bid: int, prob: float, visited: set):
+        """DFS 传播概率因子到所有可达后继"""
+        if bid in visited:
+            return
+        visited.add(bid)
+
+        for succ in self.cfg.get(bid, []):
+            old_prob = self.block_probs.get(succ, 1.0)
+            new_prob = min(old_prob, prob)
+            if new_prob < old_prob:
+                self.block_probs[succ] = new_prob
+                self._dfs_propagate(succ, prob, visited)
+
+
+    def _resolve_prob_conflicts(self):
+        """
+        Phi 感知的冲突解决：
+        如果块有 phi 节点，检查每条入边是否携带不同的 tid 依赖，
+        只对依赖 tid 的入边来源应用概率限制，不传播到不依赖 tid 的路径。
+
+        实际策略：
+        - 对每个有多个入边的块，收集所有入边的概率
+        - 如果概率不同（说明至少有一条 tid==0 路径），
+          则检查 phi 节点的操作数来源
+        - 对于来自 tid==0 路径的操作数，其对应的指令仍受概率限制
+        - 对于来自全线程路径的操作数，不受限制
+        - 最终块级概率取入边概率的最大值（因为块本身被所有入边共享执行）
+        """
+        # 1. 找有多个入边且概率不同的块
+        predecessors = defaultdict(list)
+        for bid, successors in self.cfg.items():
+            for succ in successors:
+                predecessors[succ].append(bid)
+
+        for bid, preds in predecessors.items():
+            if len(preds) <= 1:
+                continue
+
+            # 收集各入边的概率
+            pred_probs = [self.block_probs.get(p, 1.0) for p in preds]
+
+            if all(abs(p - pred_probs[0]) < 1e-9 for p in pred_probs):
+                continue  # 所有入边概率相同，无需处理
+
+            # 2. 检查是否有 phi 节点
+            block = self.basic_blocks[bid]
+            has_phi = any("phi " in inst for inst in block)
+
+            if has_phi:
+                # 有 phi 节点 → 块本身不应被 tid==0 路径拉低
+                # 取入边概率的最大值（块会被全线程路径完整执行）
+                self.block_probs[bid] = max(pred_probs)
+                print(f"[Branch] Block {bid}: phi merge, probs={[f'{p:.4f}' for p in pred_probs]}, set to max={max(pred_probs):.4f}")
+            else:
+                # 无 phi 节点 → 块内指令确实只在某路径执行
+                # 保持 min 策略（已在 _propagate_prob 中处理）
+                pass
+
 
 if __name__ == "__main__":
     block_x = 512
     block_y = 1
     kernel_param = {
-        "template_param": [1024],
+        "template_param": [4096],
         "data_type": ["float", "half", "half"]
     }
     with open('op.ll', 'r', encoding='utf-8') as f:
