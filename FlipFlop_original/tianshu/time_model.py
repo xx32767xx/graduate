@@ -134,11 +134,12 @@ class HongKimExecutionTimeModel:
             w_coal = mem_coal/global_count
             w_un   = mem_uncoal/global_count
             w_part = mem_part/global_count
-            dd_global = (w_coal*self.Dep_coal_s
-                       + w_un  *self.Dep_uncoal_s
+            dd_global = (w_coal*self.Dep_coal_s * self.analysis.uncoal_transactions_per_warp
+                       + w_un  *self.Dep_uncoal_s * self.analysis.coal_transactions_per_warp
                        + w_part*self.Dep_part_s)
         else:
             dd_global=0.0
+        print(f"dd_global:{dd_global}")
 
         dd_local  = self.Dep_local_s
         dd_shared = self.Dep_shared_s
