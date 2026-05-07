@@ -597,7 +597,7 @@ class LLVMAnalyzer:
         print(f"[Coalescing] warp_size={warp_size}, stride={estimated_stride:.2f}, "
               f"elem_size={avg_element_size}, cache_line={cache_line_size}, "
               f"transactions={transactions}")
-        return mem_coal, mem_uncoal, mem_partial, coal_per_mw, uncoal_per_mw
+        return mem_coal, mem_uncoal, mem_partial, coal_per_mw, 10
 
     def _get_avg_memory_access_size(self) -> int:
         """从 LLVM IR 推断平均访存大小（字节）"""
