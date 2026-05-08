@@ -115,7 +115,9 @@ class AutoTester:
 import sys
 sys.path.append('/path/to/your/analysis/module')  # 根据实际情况修改
 
-from your_module import GPUArchitecture, LLVMAnalyzer, HongKimExecutionTimeModel
+from gpu_common import GPUArchitecture,KernelAnalysis
+from time_model import HongKimExecutionTimeModel
+from LLVMAnalyzer import LLVMAnalyzer
 
 block_x = {config['block_x']}
 block_y = {config['block_y']}
