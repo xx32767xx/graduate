@@ -26,7 +26,7 @@
   },
 
     "add": {
-    "source_file": " /root/InfiniGraph/InfiniCore/src/infiniop/ops/add/nvidia/add_nvidia.cu",
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add/nvidia/add_nvidia.cu",
     "benchmark_script": "add_benchmark.py",
     "block_x": 1024,
     "block_y": 1,
