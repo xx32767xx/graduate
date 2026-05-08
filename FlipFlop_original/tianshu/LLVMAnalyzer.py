@@ -739,7 +739,7 @@ class LLVMAnalyzer:
         start_pattern = "Classifying expressions for: @"
 
         try:
-            with open("analysis.txt", 'r', encoding='utf-8') as f:
+            with open("obj/analysis.txt", 'r', encoding='utf-8') as f:
                 for line in f:
                     if inside_block:
                         if start_pattern in line:
@@ -990,7 +990,7 @@ if __name__ == "__main__":
         "template_param": [4096],
         "data_type": ["float", "half", "half"]
     }
-    with open('op.ll', 'r', encoding='utf-8') as f:
+    with open('obj/op.ll', 'r', encoding='utf-8') as f:
         content = f.read()
 
     arch = None

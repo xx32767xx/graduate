@@ -1,0 +1,38 @@
+{
+  "add_rms_norm_nvidia": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu",
+    "benchmark_script": "rmsnorm_benchmark.py",
+    "block_x": 4096,
+    "block_y": 1,
+    "grid_x": 16,
+    "grid_y": 1,
+    "kernel_param": {
+      "template_param": [4096],
+      "data_type": ["float", "half", "half"]
+    }
+  },
+  "matmul_nvidia": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/matmul/nvidia/matmul_nvidia.cu",
+    "benchmark_script": "benchmark_matmul.py",
+    "block_x": 256,
+    "block_y": 1,
+    "grid_x": 64,
+    "grid_y": 1,
+    "kernel_param": {
+      "template_param": [1024],
+      "data_type": ["float", "float", "float"]
+    }
+  },
+  "softmax_nvidia": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/softmax/nvidia/softmax_nvidia.cu",
+    "benchmark_script": "benchmark_softmax.py",
+    "block_x": 1024,
+    "block_y": 1,
+    "grid_x": 8,
+    "grid_y": 1,
+    "kernel_param": {
+      "template_param": [1024],
+      "data_type": ["float", "half", "half"]
+    }
+  }
+}
