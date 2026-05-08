@@ -212,7 +212,7 @@ print(f"Estimated execution time is {{est_time_ms}} ms")
             return False
 
         # 步骤5: 运行实际benchmark
-        if not self.run_benchmark(config['benchmark_script']):
+        if not self.run_benchmark(f"exp/{config['benchmark_script']}"):
             return False
 
         print(f"✓ 测试完成: {filename}")
