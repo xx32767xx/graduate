@@ -10,7 +10,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from framework import BaseOperatorTest TensorSpec  TestCase GenericTestRunner is_broadcast
+from framework import BaseOperatorTest,TensorSpec,TestCase,GenericTestRunner,is_broadcast
 
 # Test cases format: (in_shape, in_strides_or_None, beta_or_None, threshold_or_None)
 
