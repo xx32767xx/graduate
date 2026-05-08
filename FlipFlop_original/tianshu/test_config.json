@@ -23,5 +23,18 @@
       "template_param": [1024],
       "data_type": ["float"]
     }
+  },
+
+    "add": {
+    "source_file": " /root/InfiniGraph/InfiniCore/src/infiniop/ops/add/nvidia/add_nvidia.cu",
+    "benchmark_script": "add_benchmark.py",
+    "block_x": 1024,
+    "block_y": 1,
+    "grid_x": 8,
+    "grid_y": 1,
+    "kernel_param": {
+      "template_param": [1024],
+      "data_type": ["float"]
+    }
   }
 }
