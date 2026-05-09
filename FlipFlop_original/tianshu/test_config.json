@@ -28,7 +28,6 @@
         "template_args":[
             [4096, "unsigned int"],
             "float",
-            "half",
             "float"
         ]
     }
