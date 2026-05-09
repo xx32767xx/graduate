@@ -7,9 +7,14 @@
     "grid_x": 16,
     "grid_y": 1,
     "kernel_param": {
-      "template_param": [4096],
-      "data_type": ["float", "half", "half"]
-    }
+        "func_name":"elementwiseKernel",
+        "template_args":[
+            [4096, "unsigned int"],
+            "float",
+            "half",
+            "float"
+        ]
+}
   },
   "causal_softmax_nvidia": {
     "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/causal_softmax_nvidia.cu",
@@ -19,8 +24,13 @@
     "grid_x": 16,
     "grid_y": 1,
     "kernel_param": {
-      "template_param": [4096],
-      "data_type": ["float", "half", "half"]
+        "func_name":"add_rmsnormKernel",
+        "template_args":[
+            [4096, "unsigned int"],
+            "float",
+            "half",
+            "float"
+        ]
     }
   }
 }

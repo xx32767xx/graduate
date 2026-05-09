@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Dict, List, Tuple
 
 from gpu_common import GPUArchitecture
-
+from name_mangler import  mangle_cuda_kernel,mangle_operator
 
 class InstInfo:
     def __init__(self, op:str, args:List[str]):
@@ -24,9 +24,9 @@ class LLVMAnalyzer:
     """
 
     def __init__(self, llvm_code: str, arch, block_x: int, block_y: int, config: dict = None, kernel_param:dict = None):
-        self.kernel_part_name = self._generate_mangled_name(
-            kernel_param["template_param"],
-            kernel_param["data_type"]
+        self.kernel_part_name = mangle_cuda_kernel(
+            func_name= kernel_param["func_name"],
+            template_args= kernel_param["template_args"]
         )
         self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
         self.arch = arch
@@ -121,41 +121,6 @@ class LLVMAnalyzer:
             block_x=self.block_x,
             block_y=self.block_y
         )
-
-    def _generate_mangled_name(self, template_param: list, data_types: list) -> str:
-        """
-        根据 Itanium ABI 混淆规则生成 add_rmsnormKernel 的全称
-        """
-        # 基础类型映射
-        type_map = {
-            "float": "f",
-            "half": "6__half",
-            "bfloat16": "13__nv_bfloat16"
-        }
-
-        # 1. 处理模板部分 (ILj...E)
-        block_size = template_param[0]
-        mangled = f"ILj{block_size}E"
-
-        # 2. 处理类型序列并执行压缩逻辑 (Substitution)
-        raw_types = [type_map.get(t, "f") for t in data_types]
-        seen_types = []
-        final_types = ""
-
-        for i, t in enumerate(raw_types):
-            if t in seen_types:
-                # 如果类型之前出现过，使用压缩符号
-                idx = seen_types.index(t)
-                if idx == 0:
-                    final_types += "S0_"  # 第一个重复通常是 S_ 或 S0_，根据编译器实现有细微差别
-                else:
-                    final_types += f"S{idx - 1}_"
-            else:
-                final_types += t
-                seen_types.append(t)
-
-        # 组装完整的函数名前缀（匹配 define @ 后的内容）
-        return f"{mangled}{final_types}"
 
     def _preprocess_llvm(self, raw_llvm_code: str, target_fingerprint: str) -> Tuple[List[str], List[str]]:
         # 1. 生成精准的部分匹配指纹
