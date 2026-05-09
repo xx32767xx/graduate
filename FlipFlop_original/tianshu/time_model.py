@@ -196,7 +196,7 @@ class HongKimExecutionTimeModel:
             depCycles   = mem_dep*self.arch.clock_rate_hz
             scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
             hide_factor = min(1.0, MWP / warps_per_block)
-            syncCycles = depCycles * scount * (1 - hide_factor) * reps
+            syncCycles = depCycles * scount * (1 - hide_factor) * reps * 500
             totalCycles+= syncCycles
             print(f"sync_cycle:{syncCycles}")
 

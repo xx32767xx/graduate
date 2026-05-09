@@ -409,7 +409,9 @@ class LLVMAnalyzer:
                     alc += 1
                 elif "barrier" in orig_ln:
                     sy += 1
-                elif "llvm.bi.slb.shfl" in orig_ln or "read.ptx.sreg" in orig_ln:
+                elif "llvm.bi.slb.shfl" in orig_ln:
+                    alc += 8
+                elif  "read.ptx.sreg" in orig_ln:
                     alc += 1
                 else:
                     alc += 1  # 其他如 switch, fence 等
