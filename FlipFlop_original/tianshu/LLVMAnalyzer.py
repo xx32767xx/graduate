@@ -29,8 +29,7 @@ class LLVMAnalyzer:
             template_args= kernel_param["template_args"]
         )
         self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
-        for line in llvm_code:
-            print(line)
+        print(self.llvm_code)
         print("====================================================")
         self.arch = arch
         self.block_x = block_x
