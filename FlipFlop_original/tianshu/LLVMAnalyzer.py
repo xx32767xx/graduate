@@ -29,6 +29,9 @@ class LLVMAnalyzer:
             template_args= kernel_param["template_args"]
         )
         self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
+        for line in llvm_code:
+            print(line)
+        print("====================================================")
         self.arch = arch
         self.block_x = block_x
         self.block_y = block_y
@@ -344,7 +347,7 @@ class LLVMAnalyzer:
         计算每个基本块的执行权重，自动处理嵌套循环。
         """
         # 1. 初始化每个块的权重为 1
-        self.block_weights = {bid: 1 for bid in range(len(self.basic_blocks))}
+        self.block_weights = {bid: self.block_probs[bid] for bid in range(len(self.basic_blocks))}
 
         # 2. 识别所有循环及其对应的迭代次数
         loop_iters = self._estimate_loop_iterations(loops)  # 返回 {head: count}
