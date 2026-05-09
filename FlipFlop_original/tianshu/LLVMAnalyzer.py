@@ -102,7 +102,6 @@ class LLVMAnalyzer:
         total_compute = inst_counts['fpc'] + inst_counts['inc'] + inst_counts['fpc'] + inst_counts['alc']
         total_insts = (mem_coal + mem_un + mem_part +
                        inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
-        self._debug_pressure()
 
 
         from gpu_common import KernelAnalysis
@@ -688,18 +687,6 @@ class LLVMAnalyzer:
             max_reg_peak = max(max_reg_peak, block_peak)
 
         return max_reg_peak
-
-    def _debug_pressure(self):
-        """
-        打印调试信息，检查每个块的活跃度
-        """
-        print("\n[Register Pressure Debug]")
-        for b in range(len(self.basic_blocks)):
-            # 这里的 LIVE 应该理解为“经过该块的活跃变量”
-            # 为了更准，我们打印入口和出口的数量
-            in_set = self.reg_in[b]
-            out_set = self.reg_out[b]
-            print(f"Block {b}: IN={len(in_set)}, OUT={len(out_set)}, DEF={len(self.reg_def[b])}")
 
     def _extract_kernel_analyses(self,kernel_name:str):
         inside_block = False

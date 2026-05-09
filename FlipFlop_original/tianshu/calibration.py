@@ -673,76 +673,76 @@ class Calibrator:
         return bw_gbps
 
 
-def _measure_sync_fixed_latency(self) -> float:
-    """
-    测量单个 __syncthreads() 的固定物理周期损耗。
-    通过对比 '纯计算循环' 与 '带同步的计算循环' 的耗时差，提取同步指令的硬性延迟。
-    """
-    cpp_src = """
-       void launch_sync_bench(int iterations, int mode); 
-       """
-    # mode 0: 纯计算 (Base)
-    # mode 1: 计算 + 同步 (Test)
-    kernel_src = """
-       __global__ void syncBenchKernel(int iterations, int mode) {
-           int a = threadIdx.x;
-           if (mode == 0) {
-               for(int i = 0; i < iterations; i++) {
-                   // 使用 asm 确保加法指令不被优化掉
-                   asm volatile("add.s32 %0, %0, 1;" : "+r"(a)); 
-               }
-           } else {
-               for(int i = 0; i < iterations; i++) {
-                   asm volatile("add.s32 %0, %0, 1;" : "+r"(a));
-                   __syncthreads();
+    def _measure_sync_fixed_latency(self) -> float:
+        """
+        测量单个 __syncthreads() 的固定物理周期损耗。
+        通过对比 '纯计算循环' 与 '带同步的计算循环' 的耗时差，提取同步指令的硬性延迟。
+        """
+        cpp_src = """
+           void launch_sync_bench(int iterations, int mode); 
+           """
+        # mode 0: 纯计算 (Base)
+        # mode 1: 计算 + 同步 (Test)
+        kernel_src = """
+           __global__ void syncBenchKernel(int iterations, int mode) {
+               int a = threadIdx.x;
+               if (mode == 0) {
+                   for(int i = 0; i < iterations; i++) {
+                       // 使用 asm 确保加法指令不被优化掉
+                       asm volatile("add.s32 %0, %0, 1;" : "+r"(a)); 
+                   }
+               } else {
+                   for(int i = 0; i < iterations; i++) {
+                       asm volatile("add.s32 %0, %0, 1;" : "+r"(a));
+                       __syncthreads();
+                   }
                }
            }
-       }
+    
+           void launch_sync_bench(int iterations, int mode) {
+               // 使用 1024 线程以触发完整的 Warp 间同步代价
+               syncBenchKernel<<<1, 1024>>>(iterations, mode);
+           }
+           """
 
-       void launch_sync_bench(int iterations, int mode) {
-           // 使用 1024 线程以触发完整的 Warp 间同步代价
-           syncBenchKernel<<<1, 1024>>>(iterations, mode);
-       }
-       """
+        # 编译内核
+        module = load_inline(
+            name="sync_latency_bench",
+            cpp_sources=cpp_src,
+            cuda_sources=kernel_src,
+            functions=["launch_sync_bench"],
+            extra_cuda_cflags=["-x ivcore"],
+            verbose=False,
+        )
 
-    # 编译内核
-    module = load_inline(
-        name="sync_latency_bench",
-        cpp_sources=cpp_src,
-        cuda_sources=kernel_src,
-        functions=["launch_sync_bench"],
-        extra_cuda_cflags=["-x ivcore"],
-        verbose=False,
-    )
+        func = module.launch_sync_bench
+        iterations = 500  # 循环次数
+        N = 15  # 测量重复次数
 
-    func = module.launch_sync_bench
-    iterations = 500  # 循环次数
-    N = 15  # 测量重复次数
+        def get_time(mode):
+            times = []
+            for _ in range(N):
+                start = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+                start.record()
+                func(iterations, mode)
+                end.record()
+                torch.cuda.synchronize()
+                times.append(start.elapsed_time(end))
+            return statistics.median(times)
 
-    def get_time(mode):
-        times = []
-        for _ in range(N):
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            start.record()
-            func(iterations, mode)
-            end.record()
-            torch.cuda.synchronize()
-            times.append(start.elapsed_time(end))
-        return statistics.median(times)
+        # 1. 测量基准时间 (Base: 只有计算)
+        t_base_ms = get_time(mode=0)
 
-    # 1. 测量基准时间 (Base: 只有计算)
-    t_base_ms = get_time(mode=0)
+        # 2. 测量实验时间 (Test: 计算 + 同步)
+        t_test_ms = get_time(mode=1)
 
-    # 2. 测量实验时间 (Test: 计算 + 同步)
-    t_test_ms = get_time(mode=1)
+        # 3. 计算单次同步的延迟 (纳秒)
+        # (T_test - T_base) / iterations -> 得到单次同步贡献的毫秒数 -> 换算成纳秒
+        sync_latency_ns = ((t_test_ms - t_base_ms) / iterations) * 1e6
 
-    # 3. 计算单次同步的延迟 (纳秒)
-    # (T_test - T_base) / iterations -> 得到单次同步贡献的毫秒数 -> 换算成纳秒
-    sync_latency_ns = ((t_test_ms - t_base_ms) / iterations) * 1e6
-
-    print(f"[DEBUG] Sync Bench: Base={t_base_ms:.4f}ms, Test={t_test_ms:.4f}ms")
-    return sync_latency_ns
+        print(f"[DEBUG] Sync Bench: Base={t_base_ms:.4f}ms, Test={t_test_ms:.4f}ms")
+        return sync_latency_ns
 
 def main():
     import argparse
