@@ -50,6 +50,8 @@ class Calibrator:
         print(f"[INFO] Running extended calibration for {self.device_name}")
 
         # Existing latency/throughput measurements
+        sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
+        print(sync_latency_ns)
         overhead_ns   = self._repeat_and_average(self._measure_kernel_launch_overhead)
         lat_coal_ns   = self._repeat_and_average(lambda: self._measure_global_latency(False))
         lat_uncoal_ns = self._repeat_and_average(lambda: self._measure_global_latency(True))
@@ -64,7 +66,6 @@ class Calibrator:
         eff_bw_gbps    = self._repeat_and_average(self._measure_streaming_bandwidth)
         dep_del_coal_s    = (lat_coal_ns   * 1e-9) / 16.0
         dep_del_uncoal_s  = (lat_uncoal_ns * 1e-9) /  8.0
-        sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
         occupancy_shape_param = self._measure_shape_occupancy_factor()
 
         new_info = {
@@ -684,26 +685,27 @@ class Calibrator:
         # mode 0: 纯计算 (Base)
         # mode 1: 计算 + 同步 (Test)
         kernel_src = """
-           __global__ void syncBenchKernel(int iterations, int mode) {
-               int a = threadIdx.x;
-               if (mode == 0) {
-                   for(int i = 0; i < iterations; i++) {
-                       // 使用 asm 确保加法指令不被优化掉
-                       asm volatile("add.s32 %0, %0, 1;" : "+r"(a)); 
-                   }
-               } else {
-                   for(int i = 0; i < iterations; i++) {
-                       asm volatile("add.s32 %0, %0, 1;" : "+r"(a));
-                       __syncthreads();
+               __global__ void syncBenchKernel(int iterations, int mode) {
+                   // 使用 volatile 关键字防止编译器优化掉对 a 的操作
+                   volatile int a = threadIdx.x; 
+
+                   if (mode == 0) {
+                       for(int i = 0; i < iterations; i++) {
+                           a = a + 1; 
+                       }
+                   } else {
+                       for(int i = 0; i < iterations; i++) {
+                           a = a + 1;
+                           __syncthreads();
+                       }
                    }
                }
-           }
-    
-           void launch_sync_bench(int iterations, int mode) {
-               // 使用 1024 线程以触发完整的 Warp 间同步代价
-               syncBenchKernel<<<1, 1024>>>(iterations, mode);
-           }
-           """
+
+               void launch_sync_bench(int iterations, int mode) {
+                   // 保持 1024 线程以测量真实的跨 Warp 同步开销
+                   syncBenchKernel<<<1, 1024>>>(iterations, mode);
+               }
+               """
 
         # 编译内核
         module = load_inline(
