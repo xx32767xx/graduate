@@ -959,7 +959,7 @@ class LLVMAnalyzer:
         from dependency_analyze import PureTopologyAnalyzer
         analyzer1 = PureTopologyAnalyzer()
         for b_idx in range(len(self.basic_blocks)):
-            self.block_launch_factor[b_idx] =  analyzer1.calculate_dependency_factor(self.basic_blocks[b_idx])
+            self.block_launch_factor[b_idx] =  analyzer1.get_physical_factor(self.basic_blocks[b_idx])
 
 
 if __name__ == "__main__":
