@@ -17,7 +17,7 @@
 }
   },
   "causal_softmax_nvidia": {
-    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/causal_softmax_nvidia.cu",
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/causal_softmax/nvidia/causal_softmax_nvidia.cu",
     "benchmark_script": "causal_softmax.py",
     "block_x": 4096,
     "block_y": 1,
