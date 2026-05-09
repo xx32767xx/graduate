@@ -47,9 +47,12 @@ class LLVMAnalyzer:
         self.cfg: Dict[int, List[int]] = defaultdict(list)
         self.basic_blocks: List[List[str]] = []
         self.line_to_block: Dict[int, int] = {}
+        self.reg_map: Dict[str, InstInfo] = {}
+
+        # 权重
         self.block_weights: Dict[int, int] = {}
         self.block_probs: Dict[int, float] = {}
-        self.reg_map: Dict[str, InstInfo] = {}
+        self.block_launch_factor: Dict[int, float] = {}
 
         self.occupancy_factor = 1.0
         self.shared_bank_conflict_factor = 1.0
@@ -87,6 +90,9 @@ class LLVMAnalyzer:
 
         self._analyze_branch_conditions()
         print(self.block_probs)
+
+        self._analyze_launch_factor()
+        print(self.block_launch_factor)
 
         loops = self._detect_loops()
         loop_info = self._get_loop_info(loops)
@@ -948,6 +954,12 @@ class LLVMAnalyzer:
                 # 无 phi 节点 → 块内指令确实只在某路径执行
                 # 保持 min 策略（已在 _propagate_prob 中处理）
                 pass
+
+    def _analyze_launch_factor(self):
+        from dependency_analyze import PureTopologyAnalyzer
+        analyzer1 = PureTopologyAnalyzer()
+        for b_idx in range(len(self.basic_blocks)):
+            self.block_launch_factor[b_idx] =  analyzer1.calculate_dependency_factor(self.basic_blocks[b_idx])
 
 
 if __name__ == "__main__":

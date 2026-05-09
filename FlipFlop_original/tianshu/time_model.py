@@ -263,3 +263,5 @@ class HongKimExecutionTimeModel:
         blocks_round = blocks_per_sm*sm_count
         import math
         return float(math.ceil(total_blocks/blocks_round))
+
+
