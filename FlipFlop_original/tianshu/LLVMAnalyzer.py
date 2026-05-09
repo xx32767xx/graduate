@@ -825,8 +825,8 @@ class LLVMAnalyzer:
             if cond_info["type"] == "tid_equals_zero":
                 # tid == 0：只有 1 个线程执行 true 分支
                 # true 分支概率 = 1/block_size
-                self._propagate_prob(true_bid, 1.0 / warp_count)
-                self._propagate_prob(false_bid, 1.0 - 1.0 / warp_count)
+                self._propagate_prob(true_bid, 1.0)
+                self._propagate_prob(false_bid, 1.0 )
 
             elif cond_info["type"] == "tid_less_than_bound":
                 # tid < bound：部分线程执行
