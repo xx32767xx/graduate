@@ -116,7 +116,7 @@ class LLVMAnalyzer:
             fp_insts=int(inst_counts['fpc']),
             int_insts=int(inst_counts['inc']),
             sfu_insts=int(inst_counts['sfc']),
-            alu_insts=int(inst_counts['alc']) + int(inst_counts['shr'])*4,
+            alu_insts=int(inst_counts['alc']) + int(inst_counts['shr'])*8,
             total_insts=int(total_insts),
             registers_per_thread=self.regs_per_thread,
             shared_mem_bytes=self.shared_mem_used,
