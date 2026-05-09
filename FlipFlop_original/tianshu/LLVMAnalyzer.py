@@ -825,15 +825,17 @@ class LLVMAnalyzer:
             if cond_info["type"] == "tid_equals_zero":
                 # tid == 0：只有 1 个线程执行 true 分支
                 # true 分支概率 = 1/block_size
-                self._propagate_prob(true_bid, 1.0 / block_size)
-                self._propagate_prob(false_bid, 1.0 - 1.0 / block_size)
+                self._propagate_prob(true_bid, 1.0 / warp_count)
+                self._propagate_prob(false_bid, 1.0 - 1.0 / warp_count)
 
             elif cond_info["type"] == "tid_less_than_bound":
                 # tid < bound：部分线程执行
                 bound = cond_info.get("bound", block_size)
-                ratio = min(1.0, bound / block_size)
+                active_warps = (bound + warp_size - 1) // warp_size
+                total_warps = block_size // warp_size
+                ratio = active_warps / total_warps
                 self._propagate_prob(true_bid, ratio)
-                self._propagate_prob(false_bid, 1.0 - ratio)
+                self._propagate_prob(false_bid, 1.0)
 
             elif cond_info["type"] == "all_threads":
                 # 条件不依赖 tid，所有线程走同一路径（循环边界等）
@@ -933,14 +935,23 @@ class LLVMAnalyzer:
 
             # 收集各入边的概率
             pred_probs = [self.block_probs.get(p, 1.0) for p in preds]
-
             if all(abs(p - pred_probs[0]) < 1e-9 for p in pred_probs):
                 continue  # 所有入边概率相同，无需处理
 
-            # 2. 检查是否有 phi 节点
             block = self.basic_blocks[bid]
-            has_phi = any("phi " in inst for inst in block)
+            has_barrier = any("llvm.bi.sl.barrier" in inst for inst in block)
+            if has_barrier:
+                # 同步意味着所有活跃的线程/Warp 必须到达此处
+                # 强行将概率恢复为 1.0 (或者前驱中的最大概率)
+                self.block_probs[bid] = 1.0
+                print(f"[Barrier] Block {bid}: Sync detected, resetting prob to 1.0")
 
+                # 触发一次传播，确保下游也恢复
+                self._propagate_prob(bid, 1.0)
+                continue
+
+            # 2. 检查是否有 phi 节点
+            has_phi = any("phi " in inst for inst in block)
             if has_phi:
                 # 有 phi 节点 → 块本身不应被 tid==0 路径拉低
                 # 取入边概率的最大值（块会被全线程路径完整执行）
