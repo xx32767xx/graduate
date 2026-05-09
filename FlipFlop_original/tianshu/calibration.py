@@ -52,29 +52,21 @@ class Calibrator:
         # Existing latency/throughput measurements
         overhead_ns   = self._repeat_and_average(self._measure_kernel_launch_overhead)
         lat_coal_ns   = self._repeat_and_average(lambda: self._measure_global_latency(False))
-        print(1)
         lat_uncoal_ns = self._repeat_and_average(lambda: self._measure_global_latency(True))
-        print(2)
         partial_meas = []
         for off in [64, 128, 256, 512]:
             val = self._repeat_and_average(lambda: self._measure_partial_coalescing_latency(offset=off))
             partial_meas.append((off, val))
-        print(3)
         partial_slope, partial_intcp = self._fit_linear_regression(partial_meas)
-        print(4)
         lat_shared_ns  = self._repeat_and_average(self._measure_shared_latency)
-        print(5)
         lat_local_ns   = self._repeat_and_average(self._measure_local_latency)
-        print(6)
         issue_cycles   = self._repeat_and_average(self._measure_issue_cycles)
-        print(7)
         eff_bw_gbps    = self._repeat_and_average(self._measure_streaming_bandwidth)
-        print(8)
         dep_del_coal_s    = (lat_coal_ns   * 1e-9) / 16.0
         dep_del_uncoal_s  = (lat_uncoal_ns * 1e-9) /  8.0
-
+        sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
         occupancy_shape_param = self._measure_shape_occupancy_factor()
-        print(9)
+
         new_info = {
             self.arch_key: {
                 "baseline_kernel_overhead_ns": overhead_ns,
@@ -88,6 +80,7 @@ class Calibrator:
                 "issue_cycles": issue_cycles,
                 "Departure_del_coal_s": dep_del_coal_s,
                 "Departure_del_uncoal_s": dep_del_uncoal_s,
+                "sync_latency_ns":sync_latency_ns,
                 "effective_mem_bw_gbps": eff_bw_gbps,
                 "const_sm_power": 0.25,
                 "max_power_total": 200.0,
@@ -679,6 +672,77 @@ class Calibrator:
 
         return bw_gbps
 
+
+def _measure_sync_fixed_latency(self) -> float:
+    """
+    测量单个 __syncthreads() 的固定物理周期损耗。
+    通过对比 '纯计算循环' 与 '带同步的计算循环' 的耗时差，提取同步指令的硬性延迟。
+    """
+    cpp_src = """
+       void launch_sync_bench(int iterations, int mode); 
+       """
+    # mode 0: 纯计算 (Base)
+    # mode 1: 计算 + 同步 (Test)
+    kernel_src = """
+       __global__ void syncBenchKernel(int iterations, int mode) {
+           int a = threadIdx.x;
+           if (mode == 0) {
+               for(int i = 0; i < iterations; i++) {
+                   // 使用 asm 确保加法指令不被优化掉
+                   asm volatile("add.s32 %0, %0, 1;" : "+r"(a)); 
+               }
+           } else {
+               for(int i = 0; i < iterations; i++) {
+                   asm volatile("add.s32 %0, %0, 1;" : "+r"(a));
+                   __syncthreads();
+               }
+           }
+       }
+
+       void launch_sync_bench(int iterations, int mode) {
+           // 使用 1024 线程以触发完整的 Warp 间同步代价
+           syncBenchKernel<<<1, 1024>>>(iterations, mode);
+       }
+       """
+
+    # 编译内核
+    module = load_inline(
+        name="sync_latency_bench",
+        cpp_sources=cpp_src,
+        cuda_sources=kernel_src,
+        functions=["launch_sync_bench"],
+        extra_cuda_cflags=["-x ivcore"],
+        verbose=False,
+    )
+
+    func = module.launch_sync_bench
+    iterations = 500  # 循环次数
+    N = 15  # 测量重复次数
+
+    def get_time(mode):
+        times = []
+        for _ in range(N):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            func(iterations, mode)
+            end.record()
+            torch.cuda.synchronize()
+            times.append(start.elapsed_time(end))
+        return statistics.median(times)
+
+    # 1. 测量基准时间 (Base: 只有计算)
+    t_base_ms = get_time(mode=0)
+
+    # 2. 测量实验时间 (Test: 计算 + 同步)
+    t_test_ms = get_time(mode=1)
+
+    # 3. 计算单次同步的延迟 (纳秒)
+    # (T_test - T_base) / iterations -> 得到单次同步贡献的毫秒数 -> 换算成纳秒
+    sync_latency_ns = ((t_test_ms - t_base_ms) / iterations) * 1e6
+
+    print(f"[DEBUG] Sync Bench: Base={t_base_ms:.4f}ms, Test={t_test_ms:.4f}ms")
+    return sync_latency_ns
 
 def main():
     import argparse

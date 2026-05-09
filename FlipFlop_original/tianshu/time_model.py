@@ -51,6 +51,8 @@ class HongKimExecutionTimeModel:
         self.Dep_shared_s   = float(cdata.get("Departure_del_shared_s", 1.0/self.arch.clock_rate_hz))
         self.Dep_local_s    = float(cdata.get("Departure_del_local_s",   self.Dep_uncoal_s))
 
+        self.sync_latency_ns = float(cdata.get("sync_latency_ns"))
+
     def estimate_time_ns(self) -> float:
         """
         Estimate total kernel runtime in nanoseconds using the Hong–Kim style concurrency model.
@@ -190,13 +192,10 @@ class HongKimExecutionTimeModel:
             totalCycles  = (Mem_L_cycles + Comp_cy*N) * reps   # 完全串行
             print("else")
 
-
         # sync overhead
         if mem_dep> 1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
-            depCycles   = mem_dep*self.arch.clock_rate_hz
-            scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
             hide_factor = min(1.0, MWP / warps_per_block)
-            syncCycles = depCycles * scount * (1 - hide_factor) * reps * 500
+            syncCycles = self.sync_latency_ns * (self.arch.clock_rate_hz / 1e9) * (1 - hide_factor) * reps
             totalCycles+= syncCycles
             print(f"sync_cycle:{syncCycles}")
 
