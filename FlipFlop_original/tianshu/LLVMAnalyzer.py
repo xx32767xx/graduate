@@ -351,7 +351,7 @@ class LLVMAnalyzer:
         计算每个基本块的执行权重，自动处理嵌套循环。
         """
         # 1. 初始化每个块的权重为 1
-        self.block_weights = {bid: self.block_probs[bid] for bid in range(len(self.basic_blocks))}
+        self.block_weights = {bid: self.block_probs[bid]*self.block_launch_factor[bid] for bid in range(len(self.basic_blocks))}
 
         # 2. 识别所有循环及其对应的迭代次数
         loop_iters = self._estimate_loop_iterations(loops)  # 返回 {head: count}
