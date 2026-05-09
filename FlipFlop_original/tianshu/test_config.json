@@ -11,30 +11,16 @@
       "data_type": ["float", "half", "half"]
     }
   },
-
-  "softmax_nvidia": {
-    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/softmax/nvidia/softmax_nvidia.cu",
-    "benchmark_script": "softmax_benchmark.py",
-    "block_x": 1024,
+  "causal_softmax_nvidia": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/causal_softmax_nvidia.cu",
+    "benchmark_script": "causal_softmax.py",
+    "block_x": 4096,
     "block_y": 1,
-    "grid_x": 8,
+    "grid_x": 16,
     "grid_y": 1,
     "kernel_param": {
-      "template_param": [1024],
-      "data_type": ["float"]
-    }
-  },
-
-    "add_nvidia": {
-    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add/nvidia/add_nvidia.cu",
-    "benchmark_script": "add_benchmark.py",
-    "block_x": 1024,
-    "block_y": 1,
-    "grid_x": 8,
-    "grid_y": 1,
-    "kernel_param": {
-      "template_param": [1024],
-      "data_type": ["float"]
+      "template_param": [4096],
+      "data_type": ["float", "half", "half"]
     }
   }
 }
