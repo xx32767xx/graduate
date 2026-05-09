@@ -24,7 +24,7 @@
     "grid_x": 16,
     "grid_y": 1,
     "kernel_param": {
-        "func_name":"",
+        "func_name":"causalSoftmax",
         "template_args":[
             [4096, "unsigned int"],
             "float",
