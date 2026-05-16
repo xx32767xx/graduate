@@ -107,7 +107,7 @@ class DivergenceAnalyzer:
 
         if cond_type == "tid_equals_zero":
             # tid == 0：只有1个线程走真分支
-            return max(0, parent_active - 1), max(0, parent_active - 1)
+            return 1, max(0, parent_active - 1)
 
         elif cond_type == "tid_less_than_bound":
             bound = self._get_bound_from_condition(cond_reg, reg_map)
@@ -117,7 +117,7 @@ class DivergenceAnalyzer:
                 return true_active, false_active
 
         # 无法识别，默认所有线程走真分支
-        return parent_active, 1.0
+        return parent_active, parent_active
 
     def _analyze_condition_type(self, cond_reg: str, reg_map: dict) -> str:
         """分析条件寄存器的类型"""
