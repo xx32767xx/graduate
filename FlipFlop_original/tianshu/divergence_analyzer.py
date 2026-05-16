@@ -107,6 +107,7 @@ class DivergenceAnalyzer:
             return parent_active, 0
 
         # 分析条件类型（复用原有的 _analyze_condition_type 方法）
+        print(f"[DEBUG] Condition info {info} found")
         cond_type = self._analyze_condition_type(cond_reg, reg_map)
         print(f"[DEBUG] Condition type: {cond_type}")
 
