@@ -108,6 +108,7 @@ class DivergenceAnalyzer:
 
         # 分析条件类型（复用原有的 _analyze_condition_type 方法）
         cond_type = self._analyze_condition_type(cond_reg, reg_map)
+        print(f"[DEBUG] Condition type: {cond_type}")
 
         if cond_type == "tid_equals_zero":
             # tid == 0：只有1个线程走真分支
