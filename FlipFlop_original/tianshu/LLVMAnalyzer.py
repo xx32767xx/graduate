@@ -393,7 +393,7 @@ class LLVMAnalyzer:
                 divergence_penalty = 2.0
             else:
                 divergence_penalty = 1.0
-            print(b_idx,warp_ratio,divergence_penalty)
+            print(b_idx,active,divergence_penalty)
 
             for i, key in enumerate(keys):
                 # 核心逻辑：该块的指令数 * 它要执行的次数
