@@ -94,11 +94,11 @@ class LLVMAnalyzer:
         for b_idx in range(len(self.basic_blocks)):
             # 这里提前构建寄存器图
             self._count_block_insts(b_idx)
+        for r in self.reg_use:
+            print(f"reg is:{r}")
 
         self._analyze_branch_conditions()
-
         self._analyze_launch_factor()
-
         loops = self._detect_loops()
         self._calculate_block_weights(loops)
 
