@@ -93,13 +93,17 @@ class DivergenceAnalyzer:
         # 提取条件寄存器
         cond_match = re.search(r"br i1 %([\w.]+)", br_inst)
         if not cond_match:
+            print(f"[DEBUG] No condition register found in: {br_inst}")
             return parent_active, 0
 
         cond_reg = cond_match.group(1)
+        print(f"[DEBUG] Condition register: {cond_reg}")
 
         # 回溯条件寄存器的定义
         info = reg_map.get(cond_reg)
         if not info or info.op != "icmp":
+            print(f"[DEBUG] Register {cond_reg} not found in reg_map")
+            print(f"[DEBUG] Available registers: {list(reg_map.keys())[:20]}...")
             return parent_active, 0
 
         # 分析条件类型（复用原有的 _analyze_condition_type 方法）
@@ -117,7 +121,7 @@ class DivergenceAnalyzer:
                 return true_active, false_active
 
         # 无法识别，默认所有线程走真分支
-        return parent_active / 2, parent_active / 2
+        return parent_active, parent_active
 
     def _analyze_condition_type(self, cond_reg: str, reg_map: dict) -> str:
         """分析条件寄存器的类型"""
