@@ -384,7 +384,7 @@ class LLVMAnalyzer:
             counts_tuple = self._count_block_insts(b_idx)
             iteration_factor = self.block_weights.get(b_idx, 1)
 
-            total_threads = block_x*block_y
+            total_threads = self.block_x*self.block_y
             active = self.active_threads.get(b_idx, total_threads)
             active_warps = (active + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32) if active > 0 else 0
             total_warps = (total_threads + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32)
@@ -715,8 +715,8 @@ class LLVMAnalyzer:
         start_pattern = "Classifying expressions for: @"
 
         try:
-            with open("obj/analysis.txt", 'r', encoding='utf-8') as f:
-                for line in f:
+            with open("obj/analysis.txt", 'r', encoding='utf-8') as file:
+                for line in file:
                     if inside_block:
                         if start_pattern in line:
                             break
