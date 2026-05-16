@@ -389,11 +389,11 @@ class LLVMAnalyzer:
             active_warps = (active + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32) if active > 0 else 0
             total_warps = (total_threads + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32)
             warp_ratio = active_warps / total_warps if total_warps > 0 else 1.0
-
             if self.divergence_analyzer.is_in_divergent_branch(b_idx):
                 divergence_penalty = 2.0
             else:
                 divergence_penalty = 1.0
+            print(b_idx,warp_ratio,divergence_penalty)
 
             for i, key in enumerate(keys):
                 # 核心逻辑：该块的指令数 * 它要执行的次数
@@ -782,6 +782,7 @@ class LLVMAnalyzer:
             labels=self.labels,
             line_to_block=self.line_to_block
         )
+        print(f"111 {self.active_threads}")
 
 
 if __name__ == "__main__":
