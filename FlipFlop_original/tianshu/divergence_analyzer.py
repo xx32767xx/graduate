@@ -107,7 +107,7 @@ class DivergenceAnalyzer:
 
         if cond_type == "tid_equals_zero":
             # tid == 0：只有1个线程走真分支
-            return 1, max(0, parent_active - 1)
+            return max(0, parent_active - 1), max(0, parent_active - 1)
 
         elif cond_type == "tid_less_than_bound":
             bound = self._get_bound_from_condition(cond_reg, reg_map)
