@@ -3,6 +3,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
+plt.rcParams['axes.unicode_minus'] = False
 
 def draw_full():
 
@@ -206,4 +207,75 @@ def draw_exp():
     # plt.savefig('model_validation.png')
     plt.show()
 
-draw_exp()
+
+def plot_roofline(peak_compute, peak_bandwidth, kernels=None):
+
+    # 设置中文字体（以黑体为例）
+    plt.rcParams['font.sans-serif'] = ['SimHei']
+    # 解决负号 '-' 显示为方块的问题
+    plt.rcParams['axes.unicode_minus'] = False
+    """
+    绘制 Roofline 模型图
+    :param peak_compute: 峰值算力 (GFLOPS)
+    :param peak_bandwidth: 峰值带宽 (GB/s)
+    :param kernels: 内核数据，格式为 [{'name': 'A', 'ai': 0.5, 'perf': 40}, ...]
+    """
+    # 1. 计算脊点 (Ridge Point)
+    ridge_point = peak_compute / peak_bandwidth
+
+    # 2. 准备横坐标数据 (计算强度 AI)，采用对数范围
+    ai_range = np.logspace(-2, 2, 500)  # 从 0.01 到 100
+
+    # 3. 计算 Roofline 边界
+    # 可达性能 = min(峰值算力, 带宽 * AI)
+    attainable_perf = np.minimum(peak_compute, peak_bandwidth * ai_range)
+
+    # 4. 创建绘图
+    plt.figure(figsize=(10, 7))
+    plt.loglog(ai_range, attainable_perf, 'r-', linewidth=3)
+
+    # 绘制水平的峰值算力线和倾斜的带宽线（延伸虚线）
+    plt.axhline(y=peak_compute, color='gray', linestyle='--', alpha=0.5)
+
+    # 5. 标注脊点
+    plt.plot(ridge_point, peak_compute, 'ko')  # 黑点标注
+    plt.annotate(f'脊点 ({ridge_point:.2f} Ops/Byte)',
+                 xy=(ridge_point, peak_compute),
+                 xytext=(ridge_point * 1.2, peak_compute * 0.5),
+                 arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5))
+
+    # 6. 绘制具体的内核点 (如果提供)
+    if kernels:
+        for k in kernels:
+            plt.scatter(k['ai'], k['perf'], label=f"{k['name']}", s=100, edgecolors='black', zorder=5)
+            plt.text(k['ai'] * 1.1, k['perf'] * 1.1, k['name'], fontsize=12, fontweight='bold')
+
+    # 7. 图表美化
+    plt.grid(True, which="both", ls="-", alpha=0.2)
+    plt.xlabel('计算强度 (FLOPs/Byte)', fontsize=12)
+    plt.ylabel('吞吐量 (GFLOPs/s)', fontsize=12)
+    plt.title('Roofline模型分析', fontsize=14)
+    plt.legend(loc='lower right')
+
+    # 填充区域标注
+    # transform=plt.gca().transAxes 表示使用相对比例（0到1）
+    # 这样无论你的算力是 500 还是 5000，标注位置都固定在图表画面上的某个百分比位置
+    plt.text(0.15, 0.3, '访存受限', transform=plt.gca().transAxes,
+             fontsize=12, color='blue', rotation=35)
+
+    plt.text(0.7, 0.9, '计算受限', transform=plt.gca().transAxes,
+             fontsize=12, color='green')
+
+    plt.tight_layout()
+    plt.show()
+
+
+# --- 示例参数 ---
+PEAK_GFLOPS = 512  # 假设峰值算力为 512 GFLOPS
+PEAK_BW = 128  # 假设峰值带宽为 128 GB/s
+MY_KERNELS = [
+    {'name': 'Kernel A', 'ai': 0.5, 'perf': 60},  # 访存受限
+    {'name': 'Kernel B', 'ai': 10.0, 'perf': 512}  # 计算受限
+]
+
+plot_roofline(PEAK_GFLOPS, PEAK_BW, MY_KERNELS)
