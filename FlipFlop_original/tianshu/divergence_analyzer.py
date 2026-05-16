@@ -117,7 +117,7 @@ class DivergenceAnalyzer:
                 return true_active, false_active
 
         # 无法识别，默认所有线程走真分支
-        return parent_active, 0
+        return parent_active, 1.0
 
     def _analyze_condition_type(self, cond_reg: str, reg_map: dict) -> str:
         """分析条件寄存器的类型"""
