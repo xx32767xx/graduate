@@ -54,7 +54,7 @@ class DivergenceAnalyzer:
         # 线程ID寄存器集合
         self.tid_regs = set()
 
-    def build_d_cfg(self, cfg: dict, basic_blocks: list, labels: dict, line_to_block: dict) -> dict:
+    def build_d_cfg(self, cfg: dict) -> dict:
         """
         构建 D-CFG（Divergence Control Flow Graph）
         删除循环回边（目标基本块编号 <= 当前基本块编号的边），只保留向前分支
@@ -226,30 +226,35 @@ class DivergenceAnalyzer:
                 print(f"[AffineMap] {reg} = {expr}")
 # ============================================================================================================
 
-    def is_divergent_branch(self, br_inst: str, reg_map: dict) -> tuple:
+    def _is_divergent_branch(self, br_inst: str, reg_map: dict) -> tuple:
         """
         判断条件分支是否发散，并返回真/假分支的线程比例
+
+        返回:
+            (is_divergent, true_ratio, false_ratio)
         """
         # 提取条件寄存器
         cond_match = re.search(r"br i1 %([\w.]+)", br_inst)
         if not cond_match:
-            return False, 1.0, 0.0
+            return True, 0.5, 0.5  # 无法提取，保守估计
 
         cond_reg = cond_match.group(1)
 
-        # 查找条件寄存器的定义（应该是 icmp）
+        # 查找条件寄存器的定义
         info = reg_map.get(cond_reg)
         if not info or not info.op.startswith("icmp") or len(info.args) < 2:
-            return False, 1.0, 0.0
+            return True, 0.5, 0.5  # 不是 icmp，保守估计
 
         arg0, arg1 = info.args[0], info.args[1]
 
-        # 检查两个操作数是否来自 tid（即是否在 affine_map 中）
+        # 检查两个操作数是否来自 tid
         from_tid_0 = self._is_from_tid(arg0)
         from_tid_1 = self._is_from_tid(arg1)
 
-        # 如果都不来自 tid，则不是发散分支
+        # 如果都不来自 tid，则不是发散分支（所有线程走同一路径）
         if not from_tid_0 and not from_tid_1:
+            # 需要判断实际走哪个分支
+            # 简化：默认走真分支
             return False, 1.0, 0.0
 
         # 获取常数边界
@@ -264,7 +269,8 @@ class DivergenceAnalyzer:
             tid_expr = self.affine_map.get(arg1)
 
         if tid_expr is None or const_val is None:
-            return False, 1.0, 0.0
+            # 无法解析，保守估计
+            return True, 0.5, 0.5
 
         # 获取比较类型
         cmp_kind = self._get_cmp_kind(cond_reg, reg_map)
@@ -274,13 +280,15 @@ class DivergenceAnalyzer:
             if const_val == 0:
                 true_threads = 1
             else:
-                true_threads = 0
+                # 非零常数的 eq 比较，通常只有极少数线程满足
+                true_threads = 1 if const_val < self.total_threads else 0
         elif cmp_kind in ["ult", "slt"]:
             true_threads = min(const_val, self.total_threads)
         elif cmp_kind in ["ugt", "sgt"]:
             true_threads = max(0, self.total_threads - const_val - 1)
         else:
-            return False, 1.0, 0.0
+            # 未知比较类型，保守估计
+            return True, 0.5, 0.5
 
         true_ratio = true_threads / self.total_threads
         false_ratio = 1.0 - true_ratio
@@ -351,7 +359,7 @@ class DivergenceAnalyzer:
             # 条件分支
             if "br i1" in last_inst:
                 # 判断是否发散，获取分支比例
-                is_divergent, true_ratio, false_ratio = self.is_divergent_branch(last_inst, reg_map)
+                is_divergent, true_ratio, false_ratio = self._is_divergent_branch(last_inst, reg_map)
 
                 # 获取目标基本块
                 true_label, false_label = self._extract_branch_targets(last_inst)
@@ -456,3 +464,83 @@ class DivergenceAnalyzer:
                 topo_order.append(bid)
 
         return topo_order
+
+# ==========================================================
+    def compute_all_divergence_penalties(self, d_cfg: dict, basic_blocks: list,
+                                         reg_map: dict, labels: dict,
+                                         line_to_block: dict,
+                                         block_inst_weights: dict) -> dict:
+        """
+        遍历所有条件分支，计算每个基本块累积的发散惩罚系数
+        使用精确公式：penalty = (I_true + I_false) / (I_true × α + I_false × β)
+
+        参数:
+            block_inst_weights: 每个基本块的指令权重（静态指令数 × 循环权重）
+        """
+        n_blocks = len(basic_blocks)
+        penalties = {i: 1.0 for i in range(n_blocks)}
+
+        topo_order = self._topological_sort(d_cfg, n_blocks)
+
+        for block_id in topo_order:
+            current_penalty = penalties.get(block_id, 1.0)
+
+            if block_id >= len(basic_blocks):
+                continue
+            block = basic_blocks[block_id]
+            if not block:
+                continue
+
+            last_inst = block[-1]
+
+            if "br i1" in last_inst:
+                # 获取分支目标
+                true_label, false_label = self._extract_branch_targets(last_inst)
+                true_target = self._get_block_id_from_label(true_label, labels, line_to_block)
+                false_target = self._get_block_id_from_label(false_label, labels, line_to_block)
+
+                # 判断是否发散，获取线程比例
+                is_divergent, true_ratio, false_ratio = self._is_divergent_branch(last_inst, reg_map)
+
+                if is_divergent and true_target is not None and false_target is not None:
+                    # 获取两个分支内所有指令的总权重
+                    # 注意：这里需要计算从目标块开始的所有后继块的总权重
+                    I_true = block_inst_weights.get(true_target, 0)
+                    I_false = block_inst_weights.get(false_target, 0)
+
+                    if I_true > 0 and I_false > 0:
+                        penalty = (I_true + I_false) / (I_true * true_ratio + I_false * false_ratio)
+                    else:
+                        penalty = 1.0  # 回退到固定值
+
+                    # 传播惩罚系数
+                    penalties[true_target] = max(penalties[true_target], current_penalty * penalty)
+                    penalties[false_target] = max(penalties[false_target], current_penalty * penalty)
+                elif true_target is not None:
+                    # 不发散，所有线程走真分支
+                    penalties[true_target] = max(penalties[true_target], current_penalty)
+
+        return penalties
+
+
+    def _get_branch_inst_weight(self, start_block: int, d_cfg: dict, block_inst_weights: dict) -> float:
+        """
+        计算从 start_block 开始，沿着 D-CFG 向下所有可达基本块的指令权重之和
+        （用于计算分支内的总指令量）
+        """
+        visited = set()
+        stack = [start_block]
+        total = 0.0
+
+        while stack:
+            bid = stack.pop()
+            if bid in visited:
+                continue
+            visited.add(bid)
+            total += block_inst_weights.get(bid, 0)
+
+            for succ in d_cfg.get(bid, []):
+                if succ not in visited:
+                    stack.append(succ)
+
+        return total

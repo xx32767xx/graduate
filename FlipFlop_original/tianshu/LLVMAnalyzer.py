@@ -91,7 +91,6 @@ class LLVMAnalyzer:
         for reg_name, inst_info in self.reg_map.items():
             print(f"reg is: {reg_name} -> {inst_info}")
 
-        self._analyze_branch_conditions()
         self._analyze_launch_factor()
         loops = self._detect_loops()
         self._calculate_block_weights(loops)
@@ -100,6 +99,8 @@ class LLVMAnalyzer:
         self.shared_bank_conflict_factor = self._estimate_shared_bank_conflicts()
 
         inst_counts = self._accumulate_kernel_totals()
+        self._analyze_branch_conditions(inst_counts)
+
         mem_coal, mem_un, mem_part = self._coalescing_breakdown(inst_counts['ldg'] + inst_counts['stg'])
 
         total_compute = inst_counts['fpc'] + inst_counts['inc'] + inst_counts['fpc'] + inst_counts['alc']
@@ -770,27 +771,53 @@ class LLVMAnalyzer:
         for b_idx in range(len(self.basic_blocks)):
             self.block_launch_factor[b_idx] =  analyzer1.get_physical_factor(self.basic_blocks[b_idx])
 
-    def _analyze_branch_conditions(self):
+
+
+    def _analyze_branch_conditions(self,block_inst_weights):
         divergence = DivergenceAnalyzer(
             arch=self.arch,
             block_x=self.block_x,
             block_y=self.block_y
         )
 
-        # 1. 构建 D-CFG（删除回边）
+        # 2. 构建 D-CFG
         d_cfg = divergence.build_d_cfg(
-            cfg=self.cfg,
+            cfg=self.cfg
+        )
+
+        # 3. 构建仿射映射
+        divergence.build_affine_map(self.reg_map)
+
+
+        # 4. 计算活跃线程数和惩罚系数
+        active_threads = divergence.compute_active_threads(
+            d_cfg=d_cfg,
             basic_blocks=self.basic_blocks,
+            reg_map=self.reg_map,
             labels=self.labels,
             line_to_block=self.line_to_block
         )
 
-        # 2. 构建仿射表达式映射
-        divergence.build_affine_map(self.reg_map)
+        penalties = divergence.compute_all_divergence_penalties(
+            d_cfg=d_cfg,
+            basic_blocks=self.basic_blocks,
+            reg_map=self.reg_map,
+            labels=self.labels,
+            line_to_block=self.line_to_block,
+            block_inst_weights=block_inst_weights
+        )
 
-        # 3. 计算活跃线程数（下一步实现）
-        active_threads = divergence.compute_active_threads(d_cfg, self.basic_blocks, self.reg_map)
+        # 6. 计算最终权重
+        final_weights = {}
+        for b_idx in range(len(self.basic_blocks)):
+            if active_threads.get(b_idx, 0) == 0:
+                penalty = 0
+            else:
+                penalty = penalties.get(b_idx, 1.0)
+            base = block_inst_weights.get(b_idx, 0)
+            final_weights[b_idx] = base * penalty
 
+        self.inst_weights = final_weights
 
 if __name__ == "__main__":
     block_x = 512
