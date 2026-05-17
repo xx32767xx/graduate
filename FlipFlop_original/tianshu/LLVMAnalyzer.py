@@ -437,7 +437,7 @@ class LLVMAnalyzer:
 
             # --- 情况 B: 第一个元素有 % (赋值开头，操作符在第三位) ---
             else:
-                res_reg = parts[0].replace('%', '')
+                res_reg = parts[0]
                 if len(parts) < 3:
                     alc += 1
                     continue
@@ -450,7 +450,7 @@ class LLVMAnalyzer:
                     for p in parts[3:]:
                         cleaned = p.strip(',')
                         if cleaned.startswith('%'):
-                            args.append(cleaned.replace('%', ''))
+                            args.append(cleaned)
                         elif cleaned.lstrip('-').isdigit():  # 匹配 0, 1, -1, 4096 等
                             args.append(cleaned)
                         elif cleaned.startswith('0x'):  # 匹配 0x3810000000000000 等十六进制
