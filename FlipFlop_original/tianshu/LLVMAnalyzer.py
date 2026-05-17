@@ -55,12 +55,6 @@ class LLVMAnalyzer:
         self.block_weights: Dict[int, int] = {}
         self.active_threads: Dict[int, float] = {}
         self.block_launch_factor: Dict[int, float] = {}
-        self.divergence_analyzer = DivergenceAnalyzer(
-            arch=self.arch,
-            block_x=self.block_x,
-            block_y=self.block_y
-        )
-
         self.occupancy_factor = 1.0
         self.shared_bank_conflict_factor = 1.0
         self.instr_counts = defaultdict(int)
@@ -439,6 +433,11 @@ class LLVMAnalyzer:
                     alc += 1
                     continue
                 op = parts[2].lower()  # 提取第三个单词作为操作符
+                if op == 'icmp':
+                    for i, p in enumerate(parts):
+                        if p == 'icmp' and i + 1 < len(parts):
+                            cmp_type = parts[i + 1]
+                            op = f"icmp {cmp_type}"
                 if "read.ptx.sreg.tid.x" in orig_ln:
                     self.reg_map[res_reg] = InstInfo("tid_get", [])
                 else:

@@ -256,3 +256,106 @@ class DivergenceAnalyzer:
         # TODO: 下一步实现数据流传播
 
         return self.active_threads
+
+    def is_divergent_branch(self, br_inst: str, reg_map: dict) -> tuple:
+        """
+        判断条件分支是否发散，并返回真/假分支的线程比例
+
+        参数:
+            br_inst: 条件分支指令（如 "br i1 %28, label %true, label %false"）
+            reg_map: 寄存器映射表
+
+        返回:
+            (is_divergent, true_ratio, false_ratio)
+            - is_divergent: True/False
+            - true_ratio: 真分支线程比例 (0~1)
+            - false_ratio: 假分支线程比例 (0~1)
+        """
+        # 提取条件寄存器
+        cond_match = re.search(r"br i1 %([\w.]+)", br_inst)
+        if not cond_match:
+            return False, 1.0, 0.0
+
+        cond_reg = cond_match.group(1)
+
+        # 查找条件寄存器的定义（应该是 icmp）
+        info = reg_map.get(cond_reg)
+        if not info or info.op != "icmp" or len(info.args) < 2:
+            return False, 1.0, 0.0
+
+        arg0, arg1 = info.args[0], info.args[1]
+
+        # 检查两个操作数是否来自 tid
+        from_tid_0 = self._is_from_tid(arg0)
+        from_tid_1 = self._is_from_tid(arg1)
+
+        # 如果都不来自 tid，则不是发散分支
+        if not from_tid_0 and not from_tid_1:
+            return False, 1.0, 0.0
+
+        # 获取常数边界
+        const_val = None
+        tid_expr = None
+
+        if from_tid_0 and self._is_constant(arg1):
+            const_val = int(arg1)
+            tid_expr = self.affine_map.get(arg0)
+        elif from_tid_1 and self._is_constant(arg0):
+            const_val = int(arg0)
+            tid_expr = self.affine_map.get(arg1)
+
+        if tid_expr is None or const_val is None:
+            return False, 1.0, 0.0
+
+        # 判断条件类型（需要解析 icmp 的比较类型）
+        # 例如："icmp eq", "icmp ne", "icmp ult", "icmp slt"
+        cmp_type = info.op  # 实际可能是 "icmp eq" 等，需要解析
+        # 简化处理：从原始指令中提取比较类型
+        cmp_kind = self._get_cmp_kind(cond_reg, reg_map)
+
+        # 计算线程比例
+        if cmp_kind == "eq":
+            # tid == const
+            if const_val == 0:
+                # 只有 tid == 0 的线程走真分支
+                true_threads = 1
+            else:
+                # 其他常数，需要具体分析
+                true_threads = 0  # 简化处理
+        elif cmp_kind in ["ult", "slt"]:
+            # tid < const
+            bound = const_val
+            true_threads = min(bound, self.total_threads)
+        elif cmp_kind in ["ugt", "sgt"]:
+            # tid > const
+            bound = const_val
+            true_threads = max(0, self.total_threads - bound - 1)
+        else:
+            return False, 1.0, 0.0
+
+        true_ratio = true_threads / self.total_threads
+        false_ratio = 1.0 - true_ratio
+
+        # 如果两个比例都在(0,1)之间，则发散
+        is_divergent = (0 < true_ratio < 1)
+
+        return is_divergent, true_ratio, false_ratio
+
+    def _is_from_tid(self, reg: str) -> bool:
+        """判断寄存器是否最终来自线程ID"""
+        if reg in self.tid_regs:
+            return True
+        # 递归查找（需要实现）
+        return False
+
+    def _get_cmp_kind(self, cond_reg: str, reg_map: dict) -> str:
+        """获取 icmp 的比较类型"""
+        info = reg_map.get(cond_reg)
+        if not info:
+            return "unknown"
+        # 从指令字符串中提取比较类型
+        # 例如 "icmp eq", "icmp ult"
+        parts = info.op.split()
+        if len(parts) >= 2:
+            return parts[1]
+        return "unknown"
