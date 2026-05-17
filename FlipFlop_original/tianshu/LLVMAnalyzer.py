@@ -521,7 +521,7 @@ class LLVMAnalyzer:
                 if ("load " in ln or "store " in ln) and "addrspace(1)" in ln:
                     total_mem_ops += 1
                     # 提取指令中引用的地址寄存器
-                    addr_regs = [p.replace('%', '').strip(',') for p in ln.split() if p.startswith('%')]
+                    addr_regs = [p.strip(',') for p in ln.split() if p.startswith('%')]
 
                     if any(is_from_tid(r) for r in addr_regs):
                         stride1_count += 1
@@ -775,14 +775,25 @@ class LLVMAnalyzer:
             self.block_launch_factor[b_idx] =  analyzer1.get_physical_factor(self.basic_blocks[b_idx])
 
     def _analyze_branch_conditions(self):
-        self.active_threads = self.divergence_analyzer.compute_active_threads(
-            basic_blocks=self.basic_blocks,
+        divergence = DivergenceAnalyzer(
+            arch=self.arch,
+            block_x=self.block_x,
+            block_y=self.block_y
+        )
+
+        # 1. 构建 D-CFG（删除回边）
+        d_cfg = divergence.build_d_cfg(
             cfg=self.cfg,
-            reg_map=self.reg_map,
+            basic_blocks=self.basic_blocks,
             labels=self.labels,
             line_to_block=self.line_to_block
         )
-        print(f"111 {self.active_threads}")
+
+        # 2. 构建仿射表达式映射
+        divergence.build_affine_map(self.reg_map)
+
+        # 3. 计算活跃线程数（下一步实现）
+        active_threads = divergence.compute_active_threads(d_cfg, self.basic_blocks, self.reg_map)
 
 
 if __name__ == "__main__":
