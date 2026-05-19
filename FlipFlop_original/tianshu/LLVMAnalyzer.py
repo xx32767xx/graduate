@@ -26,10 +26,17 @@ class LLVMAnalyzer:
     """
 
     def __init__(self, llvm_code: str, arch, block_x: int, block_y: int, config: dict = None, kernel_param:dict = None):
-        self.kernel_part_name = mangle_cuda_kernel(
-            func_name= kernel_param["func_name"],
-            template_args= kernel_param["template_args"]
-        )
+        if "operator_namespace" in kernel_param:
+            self.kernel_part_name = mangle_operator(
+                func_name=kernel_param["func_name"],
+                operator_namespace= kernel_param["operator_namespace"],
+                template_args= kernel_param["template_args"]
+            )
+        else:
+            self.kernel_part_name = mangle_cuda_kernel(
+                func_name= kernel_param["func_name"],
+                template_args= kernel_param["template_args"]
+            )
         self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
         print("====================================================")
         self.arch = arch
