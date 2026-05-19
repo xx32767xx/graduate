@@ -195,7 +195,7 @@ class HongKimExecutionTimeModel:
         # sync overhead
         if mem_dep> 1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
             hide_factor = min(1.0, MWP / warps_per_block)
-            syncCycles = self.sync_latency_ns * (self.arch.clock_rate_hz / 1e9) * (1 - hide_factor) * reps * sync_count
+            syncCycles = self.sync_latency_ns * (self.arch.clock_rate_hz / 1e9) * (1 - hide_factor) * reps
             totalCycles+= syncCycles
             print(f"sync_cycle:{syncCycles}")
 

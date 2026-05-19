@@ -3,15 +3,13 @@
 
 add_rmsnormal
 
-用例	参数 (shape, strides)	batch_size	nhead	dim	blockDim	gridDim	总CTAs
-1	((16,2048), None, None, None)	16	1	2048	(1024,1,1)	(16,1,1)	16
-2	((16,2048), (4096,1), (4096,1), (4096,1))	16	1	2048	(1024,1,1)	(16,1,1)	16
+用例	参数 (shape, strides)	batch_size	nhead	dim	blockDim	gridDim	总CTAs            A100实测  A00估计 天数实测 天数估计
 3	((15,3584), None, None, None)	15	1	3584	(1024,1,1)	(15,1,1)	15
 4	((4,4,2048), None, None, None)	4	4	2048	(1024,1,1)	(16,1,1)	16
 
 causual_softmax
 
-用例	参数 (shape, strides)	batch_size	seq_len	blockDim	gridDim	总CTAs
+用例	参数 (shape, strides)	batch_size	seq_len	blockDim	gridDim	总CTAs     A100实测  A00估计 天数实测 天数估计
 
 1	((3,3), None, None)	3	3	(1024,1,1)	(3,3,1)	9
 2	((32,512), None, None)	32	512	(1024,1,1)	(512,32,1)	16,384
