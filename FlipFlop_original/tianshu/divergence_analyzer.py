@@ -89,7 +89,7 @@ class DivergenceAnalyzer:
         # 打印调试信息
         for block_id, succs in self.d_cfg.items():
             if succs:
-                print(f"[D-CFG] Block {block_id} -> {succs}")
+                # print(f"[D-CFG] Block {block_id} -> {succs}")
 
         return self.d_cfg
 
