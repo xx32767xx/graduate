@@ -183,41 +183,53 @@ print(f"Estimated execution time is {{est_time_ms}} ms")
         return True
 
     def test_file(self, filename: str) -> bool:
-        """测试单个文件"""
         print(f"\n{'=' * 60}")
         print(f"开始测试: {filename}")
         print(f"{'=' * 60}")
 
-        # 查找配置
-        config = self.find_config(filename)
-        if not config:
+        config_entry = self.find_config(filename)
+        if not config_entry:
             return False
 
-        print(f"找到配置: {json.dumps(config, indent=2)}")
+        # 兼容旧格式：如果没有 configs 数组，包装成单元素数组
+        if "configs" not in config_entry:
+            configs = [{
+                "block_x": config_entry["block_x"],
+                "block_y": config_entry["block_y"],
+                "grid_x": config_entry["grid_x"],
+                "grid_y": config_entry["grid_y"],
+                "kernel_param": config_entry.get("kernel_param", {})
+            }]
+        else:
+            configs = config_entry["configs"]
 
-        # 步骤1: 编译
-        if not self.compile_llvm(config['source_file'],"obj"):
+        # 步骤1: 编译（只需一次）
+        if not self.compile_llvm(config_entry['source_file'], "obj"):
             return False
 
-        # 步骤2: O2优化
+        # 步骤2: O2优化（只需一次）
         if not self.optimize_llvm():
             return False
 
-        # 步骤3: 分析scalar evolution
+        # 步骤3: 分析scalar evolution（只需一次）
         if not self.analyze_scalar_evolution("obj"):
             return False
 
-        # 步骤4: 运行benchmark分析
-        if not self.run_benchmark_analysis(config):
-            return False
+        # 步骤4 & 5: 对每组配置分别运行
+        for idx, cfg in enumerate(configs):
+            print(f"\n--- 配置 {idx + 1}/{len(configs)} ---")
+            print(f"  block=({cfg['block_x']},{cfg['block_y']})  grid=({cfg['grid_x']},{cfg['grid_y']})")
 
-        # 步骤5: 运行实际benchmark
-        if not self.run_benchmark(f"exp/{config['benchmark_script']}"):
-            return False
+            if not self.run_benchmark_analysis(cfg):
+                print(f"  配置 {idx + 1} 分析失败")
+                continue
 
-        print(f"✓ 测试完成: {filename}")
+            if not self.run_benchmark(f"exp/{config_entry['benchmark_script']}"):
+                print(f"  配置 {idx + 1} benchmark失败")
+                continue
+
+        print(f"✓ 测试完成: {filename} ({len(configs)} 组配置)")
         return True
-
 
 def main():
     if len(sys.argv) < 2:
