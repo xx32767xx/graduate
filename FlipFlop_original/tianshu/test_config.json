@@ -51,7 +51,7 @@
       "benchmark_script": "paged_attention.py",
       "configs": [
           {
-              "block_x": 32, "block_y": 1, "grid_x": 16,  "grid_y": 1,
+              "block_x": 64, "block_y": 1, "grid_x": 1,  "grid_y": 1,
               "kernel_param": {
                   "func_name": "paged_attention",
                   "operator_namespace":[
@@ -64,17 +64,29 @@
               }
           },
           {
-              "block_x": 64, "block_y": 1, "grid_x": 8,   "grid_y": 1,
+              "block_x": 64, "block_y": 1, "grid_x": 40,  "grid_y": 4,
               "kernel_param": {
                   "func_name": "paged_attention",
-                  "template_args": [[2048, "unsigned int"], "float", "float"]
+                  "operator_namespace":[
+                    "op",
+                    "paged_attention",
+                    "nvidia",
+                    "flashAttentionDecodeHd64Warp"
+                  ],
+                  "template_args": ["unsigned int", "__half"]
               }
           },
           {
-              "block_x": 128, "block_y": 1, "grid_x": 4,  "grid_y": 1,
+              "block_x": 32, "block_y": 1, "grid_x": 40,  "grid_y": 6,
               "kernel_param": {
                   "func_name": "paged_attention",
-                  "template_args": [[1024, "unsigned int"], "float", "float"]
+                  "operator_namespace":[
+                    "op",
+                    "paged_attention",
+                    "nvidia",
+                    "flashAttentionDecodeHd64Warp"
+                  ],
+                  "template_args": ["unsigned int", "__half"]
               }
           }
       ]
