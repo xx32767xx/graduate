@@ -68,20 +68,20 @@ class HongKimExecutionTimeModel:
         total_warps       = total_blocks * warps_per_block
 
         # 访存指令
-        mem_coal   = float(self.analysis.mem_coal )
-        mem_uncoal = float(self.analysis.mem_uncoal )
-        mem_part   = float(self.analysis.mem_partial)
-        mem_loc    = float(self.analysis.local_insts)   #局部内存 显存溢出
-        mem_shr    = float(self.analysis.shared_insts)   #共享内存 不过显存
+        mem_coal   = float(self.analysis.mem_coal * warp_size)
+        mem_uncoal = float(self.analysis.mem_uncoal* warp_size )
+        mem_part   = float(self.analysis.mem_partial* warp_size)
+        mem_loc    = float(self.analysis.local_insts* warp_size)   #局部内存 显存溢出
+        mem_shr    = float(self.analysis.shared_insts* warp_size)   #共享内存 不过显存
 
         global_count = mem_coal + mem_uncoal + mem_part     #过显存次数
         mem_total    = global_count + mem_loc + mem_shr     #所有访存次数
 
         # 计算指令
-        comp_fp  = float(self.analysis.fp_insts )
-        comp_int = float(self.analysis.int_insts)
-        comp_sfu = float(self.analysis.sfu_insts)
-        comp_alu = float(self.analysis.alu_insts)
+        comp_fp  = float(self.analysis.fp_insts* warp_size )
+        comp_int = float(self.analysis.int_insts* warp_size)
+        comp_sfu = float(self.analysis.sfu_insts* warp_size)
+        comp_alu = float(self.analysis.alu_insts* warp_size)
         comp_sum = comp_fp + comp_int + comp_sfu + comp_alu
 
         # 同步指令
