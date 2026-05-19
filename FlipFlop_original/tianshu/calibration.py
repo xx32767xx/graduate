@@ -67,6 +67,7 @@ class Calibrator:
         dep_del_coal_s    = (lat_coal_ns   * 1e-9) / 16.0
         dep_del_uncoal_s  = (lat_uncoal_ns * 1e-9) /  8.0
         occupancy_shape_param = self._measure_shape_occupancy_factor()
+        l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
 
         new_info = {
             self.arch_key: {
@@ -86,6 +87,8 @@ class Calibrator:
                 "const_sm_power": 0.25,
                 "max_power_total": 200.0,
                 "shape_occupancy_factor": occupancy_shape_param,
+                "l2_size_bytes":l2_size_bytes,
+                "l2_latency_ns":l2_latency_ns,
             }
         }
 
@@ -744,6 +747,103 @@ class Calibrator:
 
         print(f"[DEBUG] Sync Bench: Base={t_base_ms:.4f}ms, Test={t_test_ms:.4f}ms")
         return sync_latency_ns
+
+    def _measure_l2_latency(self) -> tuple:
+        """
+        通过扫描不同数组大小的指针追逐延迟，标定L2 cache容量和命中延迟。
+        返回: (L2容量_bytes, L2命中延迟_ns)
+        """
+        cpp_src = """
+        extern "C" void launch_l2_latency(float* buf, int N, int chaseIters, float* d_out);
+        """
+
+        kernel_src = """
+        #include <cuda_runtime.h>
+
+        __global__ void l2_latency_kernel(float *buf, int N, int chaseIters, float *d_out) {
+            if(threadIdx.x != 0 || blockIdx.x != 0) return;
+
+            int pos = 0;
+            float accum = 0;
+            for(int i = 0; i < chaseIters; i++) {
+                float val = buf[pos];
+                pos = *(int*)&val;
+                pos = pos % N;
+                accum += (float)pos;
+            }
+            d_out[0] = accum;
+        }
+
+        extern "C" void launch_l2_latency(float* buf, int N, int chaseIters, float* d_out) {
+            l2_latency_kernel<<<1, 1>>>(buf, N, chaseIters, d_out);
+        }
+        """
+
+        module = load_inline(
+            name="l2_latency_bench",
+            cpp_sources=cpp_src,
+            cuda_sources=kernel_src,
+            functions=["launch_l2_latency"],
+            extra_cuda_cflags=["-x ivcore"],
+            verbose=False,
+        )
+
+        # 候选L2容量：从32KB到512KB，覆盖常见GPU的L2范围
+        l2_candidate_sizes = [32 * 1024, 64 * 1024, 128 * 1024, 256 * 1024, 512 * 1024]
+        chaseIters = 200000
+        stride = 1  # 完全合并模式，保证延迟测量不受合并程度干扰
+
+        latencies = []
+        for N in l2_candidate_sizes:
+            arr = np.zeros(N, dtype=np.float32)
+            curr_pos = 0
+            for i in range(N):
+                next_pos = (curr_pos + stride) % N
+                arr[curr_pos] = float(next_pos)
+                curr_pos = next_pos
+
+            d_buf = torch.from_numpy(arr).cuda()
+            d_out = torch.zeros(1, dtype=torch.float32).cuda()
+
+            # 预热
+            module.launch_l2_latency(d_buf.data_ptr(), N, chaseIters, d_out.data_ptr())
+            torch.cuda.synchronize()
+
+            # 多次测量取平均
+            def _run():
+                start_ev = torch.cuda.Event(enable_timing=True)
+                end_ev = torch.cuda.Event(enable_timing=True)
+                start_ev.record()
+                module.launch_l2_latency(d_buf.data_ptr(), N, chaseIters, d_out.data_ptr())
+                end_ev.record()
+                torch.cuda.synchronize()
+                ms = start_ev.elapsed_time(end_ev)
+                return (ms * 1e6) / chaseIters  # ns
+
+            per_load_ns = self._repeat_and_average(_run)
+            latencies.append((N, per_load_ns))
+
+        # 分析：找到延迟跳变点
+        # 跳变前各点的延迟均值 → L2命中延迟
+        # 跳变点对应的N → L2容量
+        base_latency = latencies[0][1]
+        l2_latency_ns = base_latency
+        l2_size_bytes = l2_candidate_sizes[0]
+
+        for i, (size, lat) in enumerate(latencies):
+            if lat > base_latency * 1.3:  # 延迟增加超过30%视为跳变
+                l2_size_bytes = l2_candidate_sizes[i - 1] if i > 0 else size
+                # 跳变前的平均延迟作为L2命中延迟
+                pre_jump_lats = [l for s, l in latencies[:i]]
+                l2_latency_ns = sum(pre_jump_lats) / len(pre_jump_lats)
+                break
+        else:
+            # 未发生跳变，取所有测点的均值
+            l2_size_bytes = l2_candidate_sizes[-1]
+            l2_latency_ns = sum(l for _, l in latencies) / len(latencies)
+
+        return l2_size_bytes, l2_latency_ns
+
 
 def main():
     import argparse
