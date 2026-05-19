@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 import os
 import json
-import re
-import math
-import numpy as np
-import pycuda.driver as cuda
-from pycuda.compiler import compile, SourceModule
 from typing import Dict, Tuple
 from dataclasses import dataclass
 
+import torch
 
 try:
     from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetPowerUsage
@@ -21,14 +17,32 @@ except ImportError:
 
 class GPUArchitecture:
     def __init__(self, device_id=0, calibration_file=None):
-        self.device = cuda.Device(device_id)
-        self.name = self.device.name()
-        self.compute_capability = self.device.compute_capability()
-        self.attrs = self._fetch_device_attributes()
+        # 1. 锁定设备索引
+        """
+        if not torch.cuda.is_available():
+            raise RuntimeError("未检测到天数智芯显卡，请检查 ixsmi")
+        """
+
+        torch.cuda.set_device(device_id)
+        self.device_id = device_id
+
+        # 2. 获取设备名称 (对应 self.device.name())
+        # 返回类似 "Iluvatar BI-V150"s
+        self.name = torch.cuda.get_device_name(device_id)
+
+        # 3. 获取计算能力 (对应 self.device.compute_capability())
+        # 天数卡通常会返回 (11, 0) 或 (8, 0)
+        self.compute_capability = torch.cuda.get_device_capability(device_id)
+
+        # 4. 提取硬件详细属性 (对应 self._fetch_device_attributes())
+        self.attrs = self._fetch_device_attributes(device_id)
+
+        # 5. 生成架构 Key (对应 sm_110 或 sm_80)
         self.arch_key = f"sm_{self.compute_capability[0]}{self.compute_capability[1]}"
+
+        # 6. 校准相关
         self.calibration_file = calibration_file
         self.calibration_data = self._load_calibration(calibration_file)
-
         if NVML_ENABLED:
             try:
                 nvmlInit()
@@ -39,18 +53,22 @@ class GPUArchitecture:
         else:
             self.nvml_handle = None
 
-    def _fetch_device_attributes(self) -> Dict:
-        da = cuda.device_attribute
+
+        print(f"[SUCCESS] 初始化设备: {self.name} | 架构: {self.arch_key}")
+
+    def _fetch_device_attributes(self,device_id) -> Dict:
+        prop = torch.cuda.get_device_properties(device_id)
+        mp_count = prop.multi_processor_count
         return {
-            'MULTIPROCESSOR_COUNT': self.device.get_attribute(da.MULTIPROCESSOR_COUNT),
-            'CLOCK_RATE': self.device.get_attribute(da.CLOCK_RATE),  # in kHz
-            'GLOBAL_MEMORY_BUS_WIDTH': self.device.get_attribute(da.GLOBAL_MEMORY_BUS_WIDTH),
-            'MEMORY_CLOCK_RATE': self.device.get_attribute(da.MEMORY_CLOCK_RATE),  # in kHz
-            'MAX_THREADS_PER_MULTIPROCESSOR': self.device.get_attribute(da.MAX_THREADS_PER_MULTIPROCESSOR),
-            'MAX_REGISTERS_PER_MULTIPROCESSOR': self.device.get_attribute(da.MAX_REGISTERS_PER_MULTIPROCESSOR),
-            'MAX_SHARED_MEMORY_PER_MULTIPROCESSOR': self.device.get_attribute(da.MAX_SHARED_MEMORY_PER_MULTIPROCESSOR),
-            'MAX_THREADS_PER_BLOCK': self.device.get_attribute(da.MAX_THREADS_PER_BLOCK),
-            'WARP_SIZE': self.device.get_attribute(da.WARP_SIZE),
+            'MULTIPROCESSOR_COUNT': mp_count,
+            'CLOCK_RATE': 1500*1000,  # in kHz
+            'GLOBAL_MEMORY_BUS_WIDTH': 4096,
+            'MEMORY_CLOCK_RATE': 1600*1000,  # in kHz
+            'MAX_THREADS_PER_MULTIPROCESSOR': 2048,
+            'MAX_REGISTERS_PER_MULTIPROCESSOR': 65536,
+            'MAX_SHARED_MEMORY_PER_MULTIPROCESSOR': 65536,
+            'MAX_THREADS_PER_BLOCK': 1024,
+            'WARP_SIZE': 64,
             'MAX_BLOCKS_PER_MULTIPROCESSOR': 32  # assume 32 if not provided
         }
 

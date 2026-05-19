@@ -51,6 +51,8 @@ class HongKimExecutionTimeModel:
         self.Dep_shared_s   = float(cdata.get("Departure_del_shared_s", 1.0/self.arch.clock_rate_hz))
         self.Dep_local_s    = float(cdata.get("Departure_del_local_s",   self.Dep_uncoal_s))
 
+        self.sync_latency_ns = float(cdata.get("sync_latency_ns"))
+
     def estimate_time_ns(self) -> float:
         """
         Estimate total kernel runtime in nanoseconds using the Hong–Kim style concurrency model.
@@ -66,20 +68,20 @@ class HongKimExecutionTimeModel:
         total_warps       = total_blocks * warps_per_block
 
         # 访存指令
-        mem_coal   = float(self.analysis.mem_coal )
-        mem_uncoal = float(self.analysis.mem_uncoal )
-        mem_part   = float(self.analysis.mem_partial)
-        mem_loc    = float(self.analysis.local_insts)   #局部内存 显存溢出
-        mem_shr    = float(self.analysis.shared_insts)   #共享内存 不过显存
+        mem_coal   = float(self.analysis.mem_coal * warp_size)
+        mem_uncoal = float(self.analysis.mem_uncoal* warp_size )
+        mem_part   = float(self.analysis.mem_partial* warp_size)
+        mem_loc    = float(self.analysis.local_insts* warp_size)   #局部内存 显存溢出
+        mem_shr    = float(self.analysis.shared_insts* warp_size)   #共享内存 不过显存
 
         global_count = mem_coal + mem_uncoal + mem_part     #过显存次数
         mem_total    = global_count + mem_loc + mem_shr     #所有访存次数
 
         # 计算指令
-        comp_fp  = float(self.analysis.fp_insts )
-        comp_int = float(self.analysis.int_insts)
-        comp_sfu = float(self.analysis.sfu_insts)
-        comp_alu = float(self.analysis.alu_insts)
+        comp_fp  = float(self.analysis.fp_insts* warp_size )
+        comp_int = float(self.analysis.int_insts* warp_size)
+        comp_sfu = float(self.analysis.sfu_insts* warp_size)
+        comp_alu = float(self.analysis.alu_insts* warp_size)
         comp_sum = comp_fp + comp_int + comp_sfu + comp_alu
 
         # 同步指令
@@ -125,7 +127,10 @@ class HongKimExecutionTimeModel:
         print(f"mem_total:{mem_total}    avg_mem_lat:{avg_mem_lat}")
         mem_cycles  = mem_total*(avg_mem_lat*self.arch.clock_rate_hz)   # 访存周期
         comp_cycles = comp_sum*self.issue_cycles    #计算周期
-
+        # 在estimate_time_ns中添加：
+        print(f"clock_rate_hz: {self.arch.clock_rate_hz}")
+        print(f"avg_mem_lat * clock_rate = {avg_mem_lat * self.arch.clock_rate_hz}")
+        print(f"mem_cycles = {mem_total} * {avg_mem_lat * self.arch.clock_rate_hz} = {mem_cycles}")
         # 计算偏离延迟
         if global_count>1e-9:
             w_coal = mem_coal/global_count
@@ -187,13 +192,10 @@ class HongKimExecutionTimeModel:
             totalCycles  = (Mem_L_cycles + Comp_cy*N) * reps   # 完全串行
             print("else")
 
-
         # sync overhead
-        if mem_dep>1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
-            depCycles   = mem_dep*self.arch.clock_rate_hz
-            blocks_psm  = blocks_per_sm
-            scount      = sync_count/float(total_blocks) if total_blocks>0 else 0.0
-            syncCycles  = depCycles*(MWP-1)*scount*blocks_psm*reps  # 代表因为同步导致的流水线排空损失*平均每个Block的同步次数*波数
+        if mem_dep> 1e-15 and warps_per_sm>1:  #如果一个内核几乎不碰内存，那么 __syncthreads()造成的“等待访存返回”的木桶效应就不存在了
+            hide_factor = min(1.0, MWP / warps_per_block)
+            syncCycles = self.sync_latency_ns * (self.arch.clock_rate_hz / 1e9) * (1 - hide_factor) * reps * sync_count
             totalCycles+= syncCycles
             print(f"sync_cycle:{syncCycles}")
 
@@ -248,6 +250,7 @@ class HongKimExecutionTimeModel:
         share_mem_lim = max_shm_sm//shared_need if shared_need>0 else tlim
 
         hw_blocklim   = arch_attrs.get('MAX_BLOCKS_PER_MULTIPROCESSOR',16)
+        print(f"!!!{(tlim, rlim, share_mem_lim, hw_blocklim)}")
         blocks_possible = min(tlim, rlim, share_mem_lim, hw_blocklim)
         return max(1, blocks_possible)
 
@@ -259,5 +262,8 @@ class HongKimExecutionTimeModel:
         # 计算满载时的总波数
         sm_count = self.arch.sm_count
         blocks_round = blocks_per_sm*sm_count
+        print(f"sm_count:{sm_count} blocks_round:{blocks_round}")
         import math
         return float(math.ceil(total_blocks/blocks_round))
+
+

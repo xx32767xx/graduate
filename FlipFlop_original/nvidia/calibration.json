@@ -1,31 +1,15 @@
 {
-  "sm_75": {
-    "baseline_kernel_overhead_ns": 19465.600047260523,
-    "Mem_LD_coal_ns": 117.48995018005371,
-    "Mem_LD_uncoal_ns": 114.48982429504395,
-    "Mem_LD_partial_ns": 114.61942291259766,
-    "partial_coalesce_slope": -0.0004999347147531807,
-    "partial_coalesce_intercept": 114.53839874267578,
-    "Mem_LD_shared_ns": 50.37904281616211,
-    "Mem_LD_local_ns": 46.54631729125977,
-    "issue_cycles": 3.0367006708145143,
-    "Departure_del_coal_s": 7.3431218862533575e-09,
-    "Departure_del_uncoal_s": 1.4311228036880494e-08,
-    "effective_mem_bw_gbps": 65.04629784737804,
-    "idle_power": 50.0,
-    "max_power_mem": 0.0,
-    "max_power_fp": 0.0,
-    "max_power_int": 0.0,
-    "max_power_sfu": 0.0,
-    "max_power_alu": 0.0,
-    "max_power_fds": 0.0,
-    "max_power_reg": 0.0,
-    "max_power_shm": 0.0,
-    "const_sm_power": 0.25,
-    "power_alpha": 0,
-    "power_beta": 0,
-    "short_kernel_scale": 1.0,
-    "max_power_total": 200.0,
-    "shape_occupancy_factor": 0.2
+  "sm_71": {
+    "baseline_kernel_overhead_ns": 4709.230782464147,
+    "Mem_LD_coal_ns": 122.70796775817871,
+    "Mem_LD_uncoal_ns": 122.7044563293457,
+    "Mem_LD_partial_ns": 122.70625305175781,
+    "Mem_LD_shared_ns": 30.13724250793457,
+    "Mem_LD_local_ns": 42.35301055908203,
+    "issue_cycles": 4.800279922485352,
+    "Departure_del_coal_s": 7.66924798488617e-09,
+    "Departure_del_uncoal_s": 1.5338057041168213e-08,
+    "effective_mem_bw_gbps": 464.70048467291537,
+    "shape_occupancy_factor": 0.1
   }
 }

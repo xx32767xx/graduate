@@ -1,0 +1,941 @@
+import math
+import re
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+from gpu_common import GPUArchitecture
+from name_mangler import mangle_cuda_kernel,mangle_operator
+from divergence_analyzer import DivergenceAnalyzer
+
+
+class InstInfo:
+    def __init__(self, op:str, args:List[str]):
+        self.op = op
+        self.args = args # 存储用到的寄存器编号列表
+
+    def __str__(self):
+        args = ""
+        for s in self.args:
+            args += s + " "
+        return self.op + " " + args
+
+class LLVMAnalyzer:
+    """
+    针对天数智芯 (Iluvatar) 的 LLVM IR 性能分析器
+    功能：从 .ll 文件中提取计算、访存和控制流信息，用于性能建模。
+    """
+
+    def __init__(self, llvm_code: str, arch, block_x: int, block_y: int, config: dict = None, kernel_param:dict = None):
+        if "operator_namespace" in kernel_param:
+            self.kernel_part_name = mangle_operator(
+                func_name=kernel_param["func_name"],
+                operator_namespace= kernel_param["operator_namespace"],
+                template_args= kernel_param["template_args"]
+            )
+            self.kernel_part_name = "_ZN2op15paged_attention6nvidia28flashAttentionDecodeHd128CtaIj13__nv_bfloat16EEvPT0_PKS4_S7_S7_PKT_SA_PKfmfmmllllllll"
+        else:
+            self.kernel_part_name = mangle_cuda_kernel(
+                func_name= kernel_param["func_name"],
+                template_args= kernel_param["template_args"]
+            )
+        self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
+        print("====================================================")
+        self.arch = arch
+        self.block_x = block_x
+        self.block_y = block_y
+        self.config = config or {}
+        self.kernel_param = kernel_param or {}
+
+        # 硬件参数初始化 (适配天数智芯)
+        self.regs_per_thread = 0  # LLVM IR 中为虚拟寄存器，后续需估算
+        self.shared_mem_used = 0
+        self.calib = arch.calibration_data if hasattr(arch, 'calibration_data') else {}
+
+        # 核心数据结构
+        self.labels: Dict[str, int] = {}
+        self.cfg: Dict[int, List[int]] = defaultdict(list)
+        self.basic_blocks: List[List[str]] = []
+        self.line_to_block: Dict[int, int] = {}
+        self.reg_map: Dict[str, InstInfo] = {}
+
+        # 权重
+        self.block_weights: Dict[int, int] = {}
+        self.active_threads: Dict[int, float] = {}
+        self.block_launch_factor: Dict[int, float] = {}
+        self.occupancy_factor = 1.0
+        self.shared_bank_conflict_factor = 1.0
+        self.instr_counts = defaultdict(int)
+
+        # 经验修正因子
+        self.occupancy_factor = 1.0
+        self.shared_bank_conflict_factor = 1.0
+
+        # llvm分析
+        self.llvm_analysis:list[str] = []
+
+        # 模拟寄存器分配
+        self.reg_use:Dict[int,set[str]] = defaultdict(set)
+        self.reg_def:Dict[int,set[str]] = defaultdict(set)
+        self.reg_in:Dict[int,set[str]] = defaultdict(set)
+        self.reg_out:Dict[int,set[str]] = defaultdict(set)
+
+
+    def analyze(self):
+        print(self.kernel_part_name)
+        self._extract_kernel_analyses(self.kernel_part_name)
+
+        self._build_label_map()
+
+        self._split_basic_blocks()
+        self._connect_blocks()
+        self._parse_llvm_resource_usage()
+
+        for b_idx in range(len(self.basic_blocks)):
+            # 这里提前构建寄存器图
+            self._count_block_insts(b_idx)
+
+        self._analyze_launch_factor()
+        loops = self._detect_loops()
+        print(self._get_loop_info(loops))
+        self._calculate_block_weights(loops)
+
+        self.occupancy_factor = self._estimate_occupancy_factor()
+        self.shared_bank_conflict_factor = self._estimate_shared_bank_conflicts()
+
+        inst_counts = self._accumulate_kernel_totals()
+        self._analyze_branch_conditions(inst_counts)
+
+        mem_coal, mem_un, mem_part = self._coalescing_breakdown(inst_counts['ldg'] + inst_counts['stg'])
+
+        total_compute = inst_counts['fpc'] + inst_counts['inc'] + inst_counts['fpc'] + inst_counts['alc']
+        total_insts = (mem_coal + mem_un + mem_part +
+                       inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
+
+        work_set =  self._estimate_working_set()
+        print(work_set)
+
+        from gpu_common import KernelAnalysis
+        return KernelAnalysis(
+            mem_coal=int(mem_coal),
+            mem_uncoal=int(mem_un),
+            mem_partial=int(mem_part),
+            local_insts=int(inst_counts['loc']),
+            shared_insts=0,
+            synch_insts=int(inst_counts['sy']),
+            fp_insts=int(inst_counts['fpc']),
+            int_insts=int(inst_counts['inc']),
+            sfu_insts=int(inst_counts['sfc']),
+            alu_insts=int(inst_counts['alc']) + int(inst_counts['shr'])*8,
+            total_insts=int(total_insts),
+            registers_per_thread=self.regs_per_thread,
+            shared_mem_bytes=self.shared_mem_used,
+            block_x=self.block_x,
+            block_y=self.block_y
+        )
+
+    def _preprocess_llvm(self, raw_llvm_code: str, target_fingerprint: str) -> Tuple[List[str], List[str]]:
+        # 1. 生成精准的部分匹配指纹
+        # 2. 精准匹配与清洗
+        clean_lines = []
+        is_extracting = False
+        raw_lines = raw_llvm_code.splitlines()
+        params = []
+
+        for line in raw_lines:
+            # 只有匹配到生成的精准全称才开始提取
+            if is_extracting:
+                content = line.split(';')[0].strip()
+                if content:
+                    clean_lines.append(content)
+                if line.strip() == "}":
+                    break
+
+            if not is_extracting:
+                if f"{target_fingerprint}" in line:
+                    parts = re.split(r'[\s(),]+', line)
+                    if parts[0] == 'define':
+                        param_section_match = re.search(r'\((.*)\)', line, re.DOTALL)
+                        param_section = param_section_match.group(1)
+                        reg_pattern = re.compile(r'%([\w.]+)')
+                        params = reg_pattern.findall(param_section)
+                        for p in parts:
+                            if f"{target_fingerprint}" in p and p[0] == '@':
+                                is_extracting = True
+                                break
+
+        if not clean_lines:
+            raise ValueError(f"Match Failed! Could not find kernel: {target_fingerprint}")
+
+        return clean_lines,params
+
+    def _parse_llvm_resource_usage(self):
+
+        # 1. 估计寄存器使用数目
+        self._build_use_def()
+        self.regs_per_thread = int(self._estimate_registers_precise())
+
+        # 2. 统计共享内存
+        self.shared_mem_used = self._extract_shm_from_ir()
+
+    def _extract_shm_from_ir(self) -> int:
+        total_bytes = 0
+        type_size_map = {
+            "float": 4,
+            "double": 8,
+            "i64": 8,
+            "i32": 4,
+            "i16": 2,
+            "i8": 1,
+            "half": 2,
+            "bfloat": 2,  # 天数智芯常用的 bf16
+            "__nv_bfloat16": 2,
+            "v2bf16": 4
+        }
+
+        # 寻找 addrspace(3) 且带有数组定义的行 [1024 x float]
+        shm_pattern = re.compile(r"addrspace\(3\)\s+global\s+\[(\d+)\s+x\s+([\w_]+)]")
+
+        # 遍历全文（注意：Shared Memory 定义通常在函数体外，即文件头部）
+        for line in self.llvm_code:
+            if "addrspace(3)" in line:
+                match = shm_pattern.search(line)
+                if match:
+                    count = int(match.group(1))
+                    dtype = match.group(2)
+                    # 获取该类型的字节数，默认为 4 字节
+                    size = type_size_map.get(dtype, 4)
+                    total_bytes += count * size
+
+        return total_bytes
+
+    def _build_label_map(self):
+        label_pattern = re.compile(r"^([\w._]+):$")
+        self.labels["-1"] = 0
+        for idx, line in enumerate(self.llvm_code):
+            match = label_pattern.match(line)
+            if match:
+                label_name = match.group(1)
+                self.labels[label_name] = idx
+
+        print(f"[LLVM Analysis] Mapped {len(self.labels)} labels.")
+
+    def _split_basic_blocks(self):
+        """
+        根据 self.labels 提供的索引，将指令流切割为基本块。
+        更新：
+        - self.basic_blocks: List[List[str]]，存储每个块的指令
+        - self.line_to_block: Dict[int, int]，记录每一行指令属于哪个块索引
+        """
+        # 将标签按行索引排序，确保切割顺序正确
+        sorted_labels = sorted(self.labels.items(), key=lambda x: x[1])
+        num_labels = len(sorted_labels)
+
+        self.basic_blocks = []
+        self.line_to_block = {}
+
+        for i in range(num_labels):
+            # 如果是最后一个标签，截取到列表末尾；否则截取到下一个标签之前
+            start_idx = sorted_labels[i][1]
+            end_idx = sorted_labels[i + 1][1] if i + 1 < num_labels else len(self.llvm_code)
+
+            # 提取块指令 (排除掉标签行本身)
+            block_content = []
+            for line_idx in range(start_idx, end_idx):
+                line = self.llvm_code[line_idx]
+                block_content.append(line)
+                self.line_to_block[line_idx] = i
+
+            self.basic_blocks.append(block_content)
+
+        print(f"[LLVM Analysis] Successfully split {len(self.basic_blocks)} basic blocks.")
+
+    def _connect_blocks(self):
+        for bid,block in enumerate(self.basic_blocks):
+            if not block: continue
+            last_inst = block[-1]  # 取最后一条指令
+            successors = []
+            # 情况 A: 有条件跳转
+            if "br i1" in last_inst:
+                # 正则提取两个 label (例如 %15, %20)
+                matches = re.findall(r"label %([\w.]+)", last_inst)
+                for bra_labels in matches:
+                    successors.append(self.line_to_block[self.labels[bra_labels]+1])
+            # 情况 B: 无条件跳转
+            elif "br label" in last_inst:
+                match = re.search(r"label %([\w.]+)", last_inst)
+                if match:
+                    successors.append(self.line_to_block[self.labels[match.group(1)]+1])
+            # 情况 C: 返回指令 (没有后续)
+            elif "ret" in last_inst:
+                pass
+            self.cfg[bid] = successors
+
+    def _detect_loops(self) -> List[Tuple[int, int]]:
+        """
+        检测 CFG 中的回边，识别循环结构
+        """
+        visited = set()
+        stack = set()  # 使用 set 加快查询速度
+        loops = []
+
+        def dfs(u):
+            visited.add(u)
+            stack.add(u)
+            for v in sorted(self.cfg[u]):
+                if v not in visited:
+                    dfs(v)
+                elif v in stack:
+                    # 发现回边：v 是之前的祖先节点，说明存在循环
+                    print(f"[LLVM Analysis] Found Loop: Entry B{v} <- Source B{u}")
+                    loops.append((v, u))
+            stack.remove(u)
+
+        for bid in range(len(self.basic_blocks)):
+            if bid not in visited:
+                dfs(bid)
+
+        return loops
+
+
+    def _get_blocks_in_loop(self, head: int, tail: int) -> set:
+        """
+        给定回边 (tail -> head)，找出循环体中的所有块。
+        逻辑：从 tail 开始在 CFG 上反向搜索，直到到达 head 为止的所有路径。
+        """
+        loop_blocks = {head, tail}
+        stack = [tail]
+
+        while stack:
+            curr = stack.pop()
+            # 查找所有能到达 curr 的前驱块 (Predecessors)
+            for prev_bid, successors in self.cfg.items():
+                if curr in successors and prev_bid not in loop_blocks:
+                    # 只有在 head 之后的块才属于这个自然循环
+                    if prev_bid >= head:
+                        loop_blocks.add(prev_bid)
+                        stack.append(prev_bid)
+
+        return loop_blocks
+
+    def _estimate_loop_iterations(self, loops: List[Tuple[int, int]]) -> Dict[Tuple[int, int], int]:
+        loop_iters = {}
+        user_loops = self.config.get("loop_iterations", {})
+
+        def block_start_line(b_idx: int) -> int:
+            """获取基本块在 self.llvm_code 中的起始行索引"""
+            # 这里的逻辑假设你的 line_to_block 已经填满
+            for i, blk in self.line_to_block.items():
+                if blk == b_idx:
+                    return i
+            return -1
+
+        def line_if_label(line_idx: int) -> str:
+            """检查指定行是否是标签，并返回标签名"""
+            # self.labels 结构为 {name: line_index}
+            for lbl, li in self.labels.items():
+                if li == line_idx:
+                    return lbl
+            return None
+
+        for head, tail in loops:
+            b_line = block_start_line(head)
+            label_name = line_if_label(b_line)
+
+            # 使用 (head, tail) 作为 Key，避免 head 被覆盖
+            if label_name and label_name in user_loops:
+                loop_iters[(head, tail)] = user_loops[label_name]
+            else:
+                loop_iters[(head, tail)] = 1
+
+        return loop_iters
+
+    def _calculate_block_weights(self, loops: list[Tuple[int, int]]) -> None:
+        """
+        计算每个基本块的执行权重，自动处理嵌套循环。
+        """
+        # 1. 初始化每个块的权重为 1
+        self.block_weights = {bid: 1 for bid in range(len(self.basic_blocks))}
+
+        # 2. 识别所有循环及其对应的迭代次数
+        loop_iters = self._estimate_loop_iterations(loops)  # 返回 {head: count}
+
+        # 3. 遍历每个循环，更新其内部块的权重
+        for head, tail in loops:
+            # 获取该循环包含的所有基本块 ID
+            loop_members = self._get_blocks_in_loop(head, tail)
+            count = loop_iters.get((head,tail), 1)
+
+            print(f"[LLVM Analysis] Applying weight {count} to Loop starting at Block {head}")
+            for bid in loop_members:
+                self.block_weights[bid] *= count
+
+
+    def _accumulate_kernel_totals(self) -> Dict[str, float]:
+        """
+        结合循环权重，统计整个内核全路径的指令压力
+        """
+        # 1. 定义分类标签（必须与 _count_block_insts 返回的 tuple 顺序一致）
+        keys = ['ldg', 'stg', 'loc', 'shr', 'sy', 'fpc', 'inc', 'sfc', 'alc']
+        totals = {k: 0.0 for k in keys}
+
+        # 3. 遍历每一个基本块进行加权累加
+        for b_idx in range(len(self.basic_blocks)):
+            # 获取该块的静态指令计数 (例如: (2, 1, 0, 0, ...))
+            counts_tuple = self._count_block_insts(b_idx)
+            iteration_factor = self.block_weights.get(b_idx, 1)
+
+            total_threads = self.block_x*self.block_y
+            active = self.active_threads.get(b_idx, total_threads)
+            active_warps = (active + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32) if active > 0 else 0
+            total_warps = (total_threads + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32)
+            warp_ratio = active_warps / total_warps if total_warps > 0 else 1.0
+            divergence_penalty = 1.0
+
+            for i, key in enumerate(keys):
+                # 核心逻辑：该块的指令数 * 它要执行的次数
+                totals[key] += counts_tuple[i] * iteration_factor * warp_ratio * divergence_penalty
+
+        return totals
+
+    def _count_block_insts(self, b_idx: int) -> Tuple[int, ...]:
+        block_lines = self.basic_blocks[b_idx]
+        ldg = stg = loc = shr = sy = fpc = inc = sfc = alc = 0
+
+        for ln in block_lines:
+            orig_ln = ln.split(';')[0].strip()  # 纯净原行用于关键字搜索
+            if not orig_ln or orig_ln.endswith(':'): continue
+
+            parts = orig_ln.split()
+            if not parts: continue
+
+            # --- 情况 A: 第一个元素没有 % (操作符开头) ---
+            if not parts[0].startswith('%'):
+                op = parts[0].lower()
+                if op == 'store':
+                    if "addrspace(1)" in orig_ln:
+                        stg += 1
+                    elif "addrspace(3)" in orig_ln:
+                        shr += 1
+                    elif "addrspace(5)" in orig_ln:
+                        loc += 1
+                    else:
+                        alc += 1
+                elif op in ['br', 'ret']:
+                    alc += 1
+                elif "barrier" in orig_ln:
+                    sy += 1
+                elif "llvm.bi.slb.shfl" in orig_ln:
+                    alc += 8
+                elif  "read.ptx.sreg" in orig_ln:
+                    alc += 1
+                else:
+                    alc += 1  # 其他如 switch, fence 等
+
+            # --- 情况 B: 第一个元素有 % (赋值开头，操作符在第三位) ---
+            else:
+                res_reg = parts[0]
+                if len(parts) < 3:
+                    alc += 1
+                    continue
+                op = parts[2].lower()  # 提取第三个单词作为操作符
+                if op == 'icmp':
+                    for i, p in enumerate(parts):
+                        if p == 'icmp' and i + 1 < len(parts):
+                            cmp_type = parts[i + 1]
+                            op = f"icmp {cmp_type}"
+                if "read.ptx.sreg.tid.x" in orig_ln:
+                    self.reg_map[res_reg] = InstInfo("tid_get", [])
+                else:
+                    # 提取所有操作数：%寄存器 + 纯数字
+                    args = []
+                    for p in parts[3:]:
+                        cleaned = p.strip(',')
+                        if cleaned.startswith('%'):
+                            args.append(cleaned)
+                        elif cleaned.lstrip('-').isdigit():  # 匹配 0, 1, -1, 4096 等
+                            args.append(cleaned)
+                        elif cleaned.startswith('0x'):  # 匹配 0x3810000000000000 等十六进制
+                            args.append(cleaned)
+                    # 注意：这里仍然没有存 float 字面量（如 0.000000e+00）
+                    # 但对于分支条件分析来说，float 比较不会直接出现在 br i1 的条件中
+                    self.reg_map[res_reg] = InstInfo(op, args)
+
+                if op == 'load':
+                    if "addrspace(1)" in orig_ln:
+                        ldg += 1
+                    elif "addrspace(3)" in orig_ln:
+                        shr += 1
+                    elif "addrspace(5)" in orig_ln:
+                        loc += 1
+                    else:
+                        alc += 1
+                elif op in ['fadd', 'fmul', 'fma', 'fsub', 'fneg']:
+                    fpc += 1
+                elif op in ['add', 'sub', 'shl', 'lshr', 'ashr', 'and', 'or', 'xor', 'icmp', 'zext', 'sext']:
+                    inc += 1
+                elif op == 'tail':
+                    full_line = orig_ln.lower()
+                    if 'fma' in full_line:
+                        fpc += 1  # 乘加指令是浮点运算的核心
+                    elif any(x in full_line for x in ['.sin', '.exp', '.sqrt', '.log', '.pow']):
+                        sfc += 1  # 特殊函数单元 (Special Function Unit)
+                    elif "llvm.bi.slb.shfl" in full_line or "read.ptx.sreg" in full_line:
+                        alc += 1  # 基础算术/系统寄存器
+                    else:
+                        alc += 1  # 默认归入普通算术逻辑
+                elif op in ['getelementptr', 'extractelement', 'insertelement', 'shufflevector', 'phi', 'select']:
+                    alc += 1
+                else:
+                    alc += 1
+
+        return ldg, stg, loc, shr, sy, fpc, inc, sfc, alc
+
+    def _analyze_memory_strides(self) -> float:
+        tid_regs = set()
+        total_mem_ops = 0
+        stride1_count = 0
+
+        for reg,info in self.reg_map.items():
+            if info.op == 'tid_get':
+                tid_regs.add(reg)
+
+        # 递归回溯函数：判断某个寄存器是否最终源于 tid.x
+        def is_from_tid(reg_name, depth=0):
+            if depth > 10: return False  # 防止无限循环
+            if reg_name in tid_regs: return True
+            if reg_name not in self.reg_map: return False
+
+            # 只要有一个操作数源自 tid，且操作不是大步长乘法，就认为有关联
+            info1 = self.reg_map[reg_name]
+            # 排除掉可能导致非连续访问的操作 (比如乘以一个很大的常数步长)
+            if info1.op == "mul" : return False
+            return any(is_from_tid(arg, depth + 1) for arg in info1.args)
+
+        # 第二遍扫描：利用映射表判定访存
+        for block in self.basic_blocks:
+            for ln in block:
+                if ("load " in ln or "store " in ln) and "addrspace(1)" in ln:
+                    total_mem_ops += 1
+                    # 提取指令中引用的地址寄存器
+                    addr_regs = [p.strip(',') for p in ln.split() if p.startswith('%')]
+
+                    if any(is_from_tid(r) for r in addr_regs):
+                        stride1_count += 1
+
+        return 1.0 - (stride1_count / total_mem_ops) if total_mem_ops > 0 else 0.0
+
+    def _coalescing_breakdown(self, global_ops: float) -> Tuple[float, float, float]:
+        """
+        基于 LLVM SSA 回溯结果的访存合并分解模型
+        """
+        if global_ops <= 0:
+            return 0.0, 0.0, 0.0
+
+        # 1. 获取硬件参数
+        warp_size = self.arch.attrs.get('WARP_SIZE', 32)
+        cache_line_size = self.arch.attrs.get('CACHE_LINE_SIZE', 128)  # 天数智芯通常为 128
+        # warp_size = 32
+        # cache_line_size = 128  # 天数智芯通常为 128
+
+        # 2. stride = 0.0 代表 100% 合并，stride = 1.0 代表完全离散
+        stride_factor = self._analyze_memory_strides()
+
+        # 3. 计算内存事务压力 (Transactions)
+        # 如果 stride_factor 为 0，说明是连续访问，每个 Warp 触发的事务极少
+        # 这里我们假设一个平均步长，用于估算 Transactions 数量
+        # 逻辑：如果是离散访问，transactions 数量会激增
+        avg_element_size = 4  # 默认 float
+        estimated_stride = 1.0 if stride_factor == 0 else (1.0 / (1.0 - stride_factor + 1e-6))
+        transactions = math.ceil(warp_size * estimated_stride * avg_element_size / cache_line_size)
+
+        # 4. 划分访存类型
+        # 完全合并部分
+        mem_coal = global_ops * (1.0 - stride_factor)
+
+        # 部分合并部分：基于事务数判定
+        # 如果事务数在硬件处理窗口内 (<=8)，则认为具有一定的局部性
+        part_slope = 1.0 if transactions <= 8 else 0.5
+        mem_part = global_ops * stride_factor * part_slope
+
+        # 完全不合并部分
+        mem_un = global_ops - mem_coal - mem_part
+
+        return mem_coal, mem_un, mem_part
+
+    def _estimate_occupancy_factor(self) -> float:
+        """
+        估算活跃度因子：反映硬件隐藏延迟的能力
+        """
+        # 从校准配置中获取形状修正因子
+        shape_factor = float(self.calib.get("shape_occupancy_factor", 0.2))
+        da = self.arch.attrs
+
+        # 获取硬件限制，例如天数智芯单个计算单元的最大线程数
+        max_thr_sm = da.get('MAX_THREADS_PER_MULTIPROCESSOR', 1536)
+
+        # 这里的 block_x/y 应该是你在解析 LLVM 算子时提取的参数
+        thr_block = self.block_x * self.block_y
+        if thr_block == 0:
+            return 1.0
+
+        # 1. 计算每个 SM 最多能跑多少个 Block
+        tlim = max_thr_sm // thr_block
+
+        # 2. 计算每个 Block 包含多少个 Warp
+        warp_size = da.get('WARP_SIZE', 32)
+        warps_per_block = math.ceil(thr_block / warp_size)
+
+        # 3. 计算每个 SM 上的总 Warp 数
+        total_warps_psm = tlim * warps_per_block
+
+        # 4. 计算相对于理想状态（通常为 32 个 Warp）的比例
+        ideal_warps = 32.0
+        ratio = min(max(total_warps_psm / ideal_warps, 0.25), 1.5)
+
+        # 5. 形状修正：Block 形状越“瘦长”，对缓存的局部性可能越不友好
+        aspect_ratio = self.block_x / self.block_y if self.block_y > 0 else 1.0
+        final_val = ratio - shape_factor * math.log(max(aspect_ratio, 1e-6))
+
+        return max(0.1, min(final_val, 2.0))
+
+    def _estimate_shared_bank_conflicts(self) -> float:
+        """
+        估算 Shared Memory 的 Bank 冲突概率
+        """
+        base_conflict = float(self.calib.get("base_bank_conflict", 1.0))
+        warp_size = self.arch.attrs.get('WARP_SIZE', 32)
+
+        # 逻辑：如果 Block 的宽度大于 WarpSize，且涉及 Shared Memory 访问，
+        # 往往意味着在进行数据规约或交换，Bank 冲突概率增加。
+        # 我们可以通过分析指令中是否有 addrspace(3) 来决定是否触发 1.2x 的惩罚
+        has_shared = any("addrspace(3)" in "".join(block) for block in self.basic_blocks)
+
+        if has_shared and self.block_x > warp_size:
+            return base_conflict * 1.2
+        return base_conflict
+
+    def _normalize_reg(self, token: str) -> str:
+        """提取寄存器编号，例如从 '%120' 提取 '120'"""
+        m = re.search(r"%([\w.]+)", token)
+        return m.group(1) if m else "None"
+
+    def _get_def_from_inst(self, inst: str) -> str:
+        """
+        获取指令定义的寄存器 (等号左侧)
+        """
+        # 预处理：去掉注释
+        clean_inst = inst.split(';')[0].strip()
+        if "=" in clean_inst:
+            lhs = clean_inst.split("=")[0].strip()
+            return self._normalize_reg(lhs)
+        return None
+
+    def _get_uses_from_inst(self, inst: str) -> List[str]:
+        """
+        获取指令使用的所有寄存器 (等号右侧或无等号指令)
+        """
+        clean_inst = inst.split(';')[0].strip()
+        # 如果有等号，只分析等号右侧的操作数
+        rhs = clean_inst.split("=")[1] if "=" in clean_inst else clean_inst
+
+        # 匹配所有 % 开头的寄存器名
+        reg_pattern = re.compile(r"%([\w._]+)")
+        matches = reg_pattern.findall(rhs)
+        return matches
+
+    def _build_use_def(self):
+        """
+        构建每个基本块的 USE 和 DEF 集合
+        用于数据流分析
+        """
+        self.reg_use.clear()
+        self.reg_def.clear()
+
+        for block_id, block in enumerate(self.basic_blocks):
+            defined_in_block = set()
+            used_in_block = set()
+
+            for inst in block:
+                # 提取这一行的使用情况
+                uses = self._get_uses_from_inst(inst)
+                for u in uses:
+                    # 如果该变量在块内还没被定义就被使用了，它是入口活跃的（USE 集合）
+                    if u not in defined_in_block:
+                        used_in_block.add(u)
+
+                # 提取这一行的定义情况
+                d = self._get_def_from_inst(inst)
+                if d:
+                    defined_in_block.add(d)
+
+            self.reg_use[block_id] = used_in_block
+            self.reg_def[block_id] = defined_in_block
+
+    def _estimate_registers_precise(self) -> int:
+        """
+        精确估算寄存器压力：基于 Live-Out 集合进行逆序行扫描
+        """
+        max_reg_peak = 0
+
+        for b_idx, block in enumerate(self.basic_blocks):
+            # 初始活跃集合为块出口的存活变量
+            current_live = set(self.reg_out[b_idx])
+
+            # 初始峰值（边界处）
+            block_peak = len(current_live)
+
+            # 从后往前扫描每一行指令
+            for inst in reversed(block):
+                # 1. 移除在此行被定义的寄存器（它在这一行之前是死的）
+                d = self._get_def_from_inst(inst)
+                if d:
+                    current_live.discard(d)
+
+                # 2. 加入在此行被使用的寄存器（它从这一行向上开始存活）
+                uses = self._get_uses_from_inst(inst)
+                for u in uses:
+                    current_live.add(u)
+
+                # 3. 更新该块内的瞬时压力峰值
+                block_peak = max(block_peak, len(current_live))
+
+            # 更新全局峰值
+            max_reg_peak = max(max_reg_peak, block_peak)
+
+        return max_reg_peak
+
+    def _extract_kernel_analyses(self,kernel_name:str):
+        inside_block = False
+
+        # 匹配 "Classifying expressions for: @" 开头的行
+        start_pattern = "Classifying expressions for: @"
+
+        try:
+            with open("obj/analysis.txt", 'r', encoding='utf-8') as file:
+                for line in file:
+                    if inside_block:
+                        if start_pattern in line:
+                            break
+                        else:
+                            self.llvm_analysis.append(line)
+                    else:
+                        if start_pattern in line and kernel_name in line:
+                            inside_block = True
+                            self.llvm_analysis.append(line)
+
+        except FileNotFoundError:
+            print("错误：找不到文件")
+
+    def _get_loop_info(self,loops:List[Tuple[int, int]]):
+        pattern = r"Loop\s+%([\.\w]+):\s+Predicated backedge-taken count is\s+(.*)"
+        res = []
+        for line in self.llvm_analysis:
+            line = line.strip()
+            match = re.search(pattern, line)
+            if match:
+                # 提取两个捕获组
+                label_name = match.group(1)
+                expression = match.group(2)
+
+                # 获取label在的block
+                label_line = self.labels[label_name]
+                label_block_id = self.line_to_block[label_line]
+
+                # 化简表达式
+                flag_removed = re.sub(r'<[a-z]+>', '', expression)
+                conv_pattern = r"\((?:zext|sext|trunc)\s+[\w\d]+\s+([%\.\w\d]+)\s+to\s+[\w\d]+\)"
+                conv_removed = flag_removed
+                while True:
+                    # 将整个转换结构替换为捕获的变量名
+                    new_expr = re.sub(conv_pattern, r"\1", conv_removed)
+                    if new_expr == conv_removed:
+                        break
+                    conv_removed = new_expr
+                op_suffix_pattern = r"([\+\-\*/])[us]\s+"
+                sign_removed = re.sub(op_suffix_pattern, r"\1", conv_removed)
+
+                for loop in loops:
+                    if loop[0] == label_block_id:
+                        res.append({
+                            "loop_id": loop,
+                            "expression": sign_removed
+                        })
+                        break
+
+        return res
+
+    def _analyze_launch_factor(self):
+        from dependency_analyze import PureTopologyAnalyzer
+        analyzer1 = PureTopologyAnalyzer()
+        for b_idx in range(len(self.basic_blocks)):
+            self.block_launch_factor[b_idx] =  analyzer1.get_physical_factor(self.basic_blocks[b_idx])
+
+
+
+    def _analyze_branch_conditions(self,block_inst_weights):
+        divergence = DivergenceAnalyzer(
+            arch=self.arch,
+            block_x=self.block_x,
+            block_y=self.block_y
+        )
+
+        # 2. 构建 D-CFG
+        d_cfg = divergence.build_d_cfg(
+            cfg=self.cfg
+        )
+
+        # 3. 构建仿射映射
+        divergence.build_affine_map(self.reg_map)
+
+
+        # 4. 计算活跃线程数和惩罚系数
+        active_threads = divergence.compute_active_threads(
+            d_cfg=d_cfg,
+            basic_blocks=self.basic_blocks,
+            reg_map=self.reg_map,
+            labels=self.labels,
+            line_to_block=self.line_to_block
+        )
+
+        penalties = divergence.compute_all_divergence_penalties(
+            d_cfg=d_cfg,
+            basic_blocks=self.basic_blocks,
+            reg_map=self.reg_map,
+            labels=self.labels,
+            line_to_block=self.line_to_block,
+            block_inst_weights=block_inst_weights
+        )
+
+        # 6. 计算最终权重
+        final_weights = {}
+        for b_idx in range(len(self.basic_blocks)):
+            if active_threads.get(b_idx, 0) == 0:
+                penalty = 0
+            else:
+                penalty = penalties.get(b_idx, 1.0)
+            base = block_inst_weights.get(b_idx, 0)
+            final_weights[b_idx] = base * penalty
+
+        self.inst_weights = final_weights
+
+    def _estimate_working_set(self) -> dict:
+        """
+        基于步长分级的线程束工作集估算。
+        利用3.3.2节的合并程度判断结果，区分连续与非连续访存，
+        返回单线程工作集和线程束工作集（字节）。
+        """
+        CACHELINE = 128
+        thread_bytes = 0
+        warp_bytes = 0
+
+        for block in self.basic_blocks:
+            loop_weight = 1  # 复用3.2.2节
+
+            for inst in block:
+                if not self._is_global_mem_inst(inst):  # 复用3.3.1节
+                    continue
+
+                width = self._get_type_width(inst)  # float=4, double=8等
+                is_coalesced = True  # 复用3.3.2节
+
+                # 单线程访存量（连续与非连续相同）
+                thread_bytes += width * loop_weight
+
+                # 线程束访存量（按合并程度分类处理）
+                if is_coalesced:
+                    # 连续访问：按缓存行粒度向上取整
+                    warp_range = 32 * width
+                    warp_cachelines = (warp_range + CACHELINE - 1) // CACHELINE
+                    warp_bytes += warp_cachelines * CACHELINE * loop_weight
+                else:
+                    # 非连续访问：保守估计每个线程独立访存
+                    warp_bytes += width * 32 * loop_weight
+
+        return warp_bytes
+
+    def _is_global_mem_inst(self, inst: str) -> bool:
+        """
+        判断一条LLVM IR指令是否为全局内存访存指令。
+        全局内存对应地址空间1（addrspace(1)）。
+        """
+        clean_inst = inst.strip()
+
+        # 过滤注释和空行
+        if not clean_inst or clean_inst.startswith(';'):
+            return False
+
+        # 检查是否为 load 或 store 指令
+        is_load = re.search(r'\bload\b', clean_inst)
+        is_store = re.search(r'\bstore\b', clean_inst)
+
+        if not (is_load or is_store):
+            return False
+
+        # 检查地址空间是否为1（全局内存）
+        # 典型格式: load float, float addrspace(1)* %ptr
+        #           store float %val, float addrspace(1)* %ptr
+        if re.search(r'addrspace\(1\)', clean_inst):
+            return True
+
+        # 对于没有显式addrspace的load/store（可能默认全局内存）
+        # 检查是否包含非0/3/5的地址空间
+        if re.search(r'addrspace\(\d+\)', clean_inst):
+            return False  # 有其他地址空间标记但不是1
+
+        # 无地址空间标记的load/store，在GPU上默认视为全局内存
+        return True
+
+    def _get_type_width(self, inst: str) -> int:
+        """
+        从LLVM IR指令中提取访存操作的数据类型宽度（字节）。
+        通过匹配 load/store 指令的类型声明获取。
+        """
+        # 类型到字节数的映射（与共享内存分析共用）
+        type_size_map = {
+            "float": 4,
+            "double": 8,
+            "i64": 8,
+            "i32": 4,
+            "i16": 2,
+            "i8": 1,
+            "half": 2,
+            "bfloat": 2,
+            "__nv_bfloat16": 2,
+            "v2bf16": 4,
+            "v2f16": 4,
+            "v4f16": 8,
+            "v2f32": 8,
+            "v4f32": 16,
+            "ptr": 8
+        }
+
+        clean_inst = inst.strip()
+
+        # 匹配 load 指令: load <type>, <type>* ...
+        load_match = re.search(r'load\s+(\w+)\s*,', clean_inst)
+        if load_match:
+            type_name = load_match.group(1)
+            return type_size_map.get(type_name, 4)  # 默认4字节
+
+        # 匹配 store 指令: store <type> ...
+        store_match = re.search(r'store\s+(\w+)\s+', clean_inst)
+        if store_match:
+            type_name = store_match.group(1)
+            return type_size_map.get(type_name, 4)
+
+        # 默认4字节
+        return 4
+
+if __name__ == "__main__":
+    block_x = 512
+    block_y = 1
+    kernel_param = {
+        "template_param": [4096],
+        "data_type": ["float", "half", "half"]
+    }
+    with open('obj/op.ll', 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    arch = None
+    analyzer = LLVMAnalyzer(content, arch, block_x, block_y, {}, kernel_param)
+    analysis = analyzer.analyze()
