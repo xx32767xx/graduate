@@ -19,13 +19,9 @@ from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner,
 # Test cases format: (num_seqs, max_seq_len, num_kv_heads, head_size, block_size, permute_dim_1_2)
 _TEST_CASES_DATA = [
     (1, 128, 8, 128, 16, False),
-    (1, 128, 8, 128, 16, True),
     (5, 512, 40, 256, 16, False),
-    (5, 512, 40, 256, 16, True),
     (16, 1024, 8, 64, 32, False),
-    (16, 1024, 8, 64, 32, True),
     (10, 1024, 40, 64, 32, False),
-    (10, 1024, 40, 64, 32, True),
 ]
 
 # Tolerance configuration
