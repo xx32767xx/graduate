@@ -61,15 +61,15 @@ class GPUArchitecture:
         mp_count = prop.multi_processor_count
         return {
             'MULTIPROCESSOR_COUNT': mp_count,
-            'CLOCK_RATE': 1500*1000,  # in kHz
-            'GLOBAL_MEMORY_BUS_WIDTH': 4096,
-            'MEMORY_CLOCK_RATE': 1600*1000,  # in kHz
+            'CLOCK_RATE': 1410 * 1000,
+            'GLOBAL_MEMORY_BUS_WIDTH': 5120,
+            'MEMORY_CLOCK_RATE': 1512 * 1000,
             'MAX_THREADS_PER_MULTIPROCESSOR': 2048,
             'MAX_REGISTERS_PER_MULTIPROCESSOR': 65536,
             'MAX_SHARED_MEMORY_PER_MULTIPROCESSOR': 65536,
             'MAX_THREADS_PER_BLOCK': 1024,
-            'WARP_SIZE': 64,
-            'MAX_BLOCKS_PER_MULTIPROCESSOR': 32  # assume 32 if not provided
+            'WARP_SIZE': 32,
+            'MAX_BLOCKS_PER_MULTIPROCESSOR': 32
         }
 
     @property

@@ -48,8 +48,8 @@ class Calibrator:
 
     def run_extended_calibration(self):
         print(f"[INFO] Running extended calibration for {self.device_name}")
-        #l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
-        #print(l2_size_bytes, l2_latency_ns)
+        l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
+        print(l2_size_bytes, l2_latency_ns)
 
         # Existing latency/throughput measurements
         sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
