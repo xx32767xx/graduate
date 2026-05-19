@@ -31,7 +31,6 @@ class LLVMAnalyzer:
             template_args= kernel_param["template_args"]
         )
         self.llvm_code,self.params = self._preprocess_llvm(llvm_code,self.kernel_part_name)
-        print(self.llvm_code)
         print("====================================================")
         self.arch = arch
         self.block_x = block_x
@@ -78,18 +77,14 @@ class LLVMAnalyzer:
         self._extract_kernel_analyses(self.kernel_part_name)
 
         self._build_label_map()
-        print(self.labels)
 
         self._split_basic_blocks()
-        print(self.line_to_block)
         self._connect_blocks()
         self._parse_llvm_resource_usage()
 
         for b_idx in range(len(self.basic_blocks)):
             # 这里提前构建寄存器图
             self._count_block_insts(b_idx)
-        for reg_name, inst_info in self.reg_map.items():
-            print(f"reg is: {reg_name} -> {inst_info}")
 
         self._analyze_launch_factor()
         loops = self._detect_loops()
@@ -262,7 +257,6 @@ class LLVMAnalyzer:
             # 情况 C: 返回指令 (没有后续)
             elif "ret" in last_inst:
                 pass
-            print(f"building: {bid} {successors}")
             self.cfg[bid] = successors
 
     def _detect_loops(self) -> List[Tuple[int, int]]:
@@ -385,7 +379,6 @@ class LLVMAnalyzer:
             total_warps = (total_threads + self.arch.attrs.get('WARP_SIZE', 32) - 1) // self.arch.attrs.get('WARP_SIZE', 32)
             warp_ratio = active_warps / total_warps if total_warps > 0 else 1.0
             divergence_penalty = 1.0
-            print(b_idx,active,divergence_penalty)
 
             for i, key in enumerate(keys):
                 # 核心逻辑：该块的指令数 * 它要执行的次数

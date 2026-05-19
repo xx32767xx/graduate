@@ -31,5 +31,21 @@
             "float"
         ]
     }
+  },
+    "paged_attention": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/paged_attention/nvidia/paged_attention_nvidia.cu",
+    "benchmark_script": "paged_attention.py",
+    "block_x": 32,
+    "block_y": 1,
+    "grid_x": 16,
+    "grid_y": 1,
+    "kernel_param": {
+        "func_name":"causalSoftmax",
+        "template_args":[
+            [4096, "unsigned int"],
+            "float",
+            "float"
+        ]
+    }
   }
 }
