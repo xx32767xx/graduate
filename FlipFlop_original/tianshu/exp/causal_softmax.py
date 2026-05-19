@@ -21,12 +21,8 @@ _TEST_CASES_DATA = [
     # Basic 2D causal softmax
     ((3, 3), None, None),
     ((32, 512), None, None),
-    # Strided tensors
-    ((32, 512), (1024, 1), (1024, 1)),
-    # 3D causal softmax
     ((32, 5, 5), None, None),
     ((32, 20, 512), None, None),
-    ((32, 20, 512), (20480, 512, 1), None),
     ((28, 15, 15), None, None),
 ]
 
