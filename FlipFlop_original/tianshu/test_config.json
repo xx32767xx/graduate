@@ -1,6 +1,7 @@
 {
   "add_rms_norm": {
-    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm.cu",
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/add_rms_norm/nvidia/add_rms_norm_nvidia.cu ",
+
     "benchmark_script": "rmsnorm_benchmark.py",
     "configs": [
         {
