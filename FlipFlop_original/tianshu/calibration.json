@@ -4,16 +4,12 @@
     "Mem_LD_coal_ns": 122.70796775817871,
     "Mem_LD_uncoal_ns": 122.7044563293457,
     "Mem_LD_partial_ns": 122.70625305175781,
-    "partial_coalesce_slope": -3.7908553167653736e-06,
-    "partial_coalesce_intercept": 122.70675659179688,
     "Mem_LD_shared_ns": 30.13724250793457,
     "Mem_LD_local_ns": 42.35301055908203,
     "issue_cycles": 4.800279922485352,
     "Departure_del_coal_s": 7.66924798488617e-09,
     "Departure_del_uncoal_s": 1.5338057041168213e-08,
     "effective_mem_bw_gbps": 464.70048467291537,
-    "const_sm_power": 0.25,
-    "max_power_total": 200.0,
     "shape_occupancy_factor": 0.1
   }
 }

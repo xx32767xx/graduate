@@ -673,7 +673,6 @@ class Calibrator:
 
         return bw_gbps
 
-
     def _measure_sync_fixed_latency(self) -> float:
         """
         测量单个 __syncthreads() 的固定物理周期损耗。

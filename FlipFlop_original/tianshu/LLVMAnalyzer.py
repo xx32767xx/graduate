@@ -486,11 +486,6 @@ class LLVMAnalyzer:
 
         return ldg, stg, loc, shr, sy, fpc, inc, sfc, alc
 
-    class InstInfo:
-        def __init__(self, op, args):
-            self.op = op
-            self.args = args  # 存储用到的寄存器编号列表
-
     def _analyze_memory_strides(self) -> float:
         tid_regs = set()
         total_mem_ops = 0
