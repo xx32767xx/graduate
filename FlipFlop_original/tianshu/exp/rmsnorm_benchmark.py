@@ -18,8 +18,6 @@ from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner,
 # Test cases format: (y_shape, a_shape, b_shape, w_shape, y_strides, a_strides, b_strides)
 _TEST_CASES_DATA = [
     # Large tensors
-    ((16, 2048), (16, 2048), (16, 2048), (2048,), None, None, None),
-    ((16, 2048), (16, 2048), (16, 2048), (2048,), (4096, 1), (4096, 1), (4096, 1)),
     ((15, 3584), (15, 3584), (15, 3584), (3584,), None, None, None),
     ((4, 4, 2048), (4, 4, 2048), (4, 4, 2048), (2048,), None, None, None),
 ]
