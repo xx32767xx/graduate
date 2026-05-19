@@ -11,13 +11,17 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner, is_broadcast
-
 # ==============================================================================
 # Operator-specific configuration
 # ==============================================================================
 
+# Test cases format: (y_shape, a_shape, b_shape, w_shape, y_strides, a_strides, b_strides)
 _TEST_CASES_DATA = [
-    ((16, 4096), (16, 4096), (16, 4096), (4096,)),
+    # Large tensors
+    ((16, 2048), (16, 2048), (16, 2048), (2048,), None, None, None),
+    ((16, 2048), (16, 2048), (16, 2048), (2048,), (4096, 1), (4096, 1), (4096, 1)),
+    ((15, 3584), (15, 3584), (15, 3584), (3584,), None, None, None),
+    ((4, 4, 2048), (4, 4, 2048), (4, 4, 2048), (2048,), None, None, None),
 ]
 
 # Tolerance configuration
@@ -87,6 +91,27 @@ def parse_test_cases():
                         description=f"AddRMSNorm - OUT_OF_PLACE",
                     )
                 )
+
+                # Test Case 2: In-place with explicit output tensors (add_rms_norm_(y, residual_out, a, b, w))
+                # if y_supports_inplace:
+                #     residual_out_spec = TensorSpec.from_tensor(
+                #         a_shape, a_strides, input_dtype
+                #     )
+                #     test_cases.append(
+                #         TestCase(
+                #             inputs=[a_spec, b_spec, w_spec],
+                #             kwargs={
+                #                 "epsilon": _EPSILON,
+                #                 "out": y_spec,
+                #                 "residual": residual_out_spec,
+                #             },
+                #             output_specs=[y_spec, residual_out_spec],  # Two outputs
+                #             comparison_target="out",
+                #             tolerance=tolerance,
+                #             output_count=2,
+                #             description=f"AddRMSNorm - INPLACE(out)",
+                #         )
+                #     )
 
     return test_cases
 

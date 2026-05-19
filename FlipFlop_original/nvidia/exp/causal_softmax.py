@@ -10,7 +10,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner, is_broadcast
+from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner, is_broadcast,TensorInitializer
 # ==============================================================================
 # Operator-specific configuration
 # ==============================================================================
@@ -19,10 +19,15 @@ from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner,
 # Causal softmax is a single-input function that applies causal masking before softmax
 _TEST_CASES_DATA = [
     # Basic 2D causal softmax
+    ((3, 3), None, None),
+    ((32, 512), None, None),
     # Strided tensors
     ((32, 512), (1024, 1), (1024, 1)),
     # 3D causal softmax
-
+    ((32, 5, 5), None, None),
+    ((32, 20, 512), None, None),
+    ((32, 20, 512), (20480, 512, 1), None),
+    ((28, 15, 15), None, None),
 ]
 
 # Tolerance

@@ -26,13 +26,14 @@ class LLVMAnalyzer:
     """
 
     def __init__(self, llvm_code: str, arch, block_x: int, block_y: int, config: dict = None, kernel_param:dict = None):
-        if "operator_namespace" in kernel_param:
+        if "part_name" in kernel_param:
+            self.kernel_part_name = kernel_param["part_name"]
+        elif "operator_namespace" in kernel_param:
             self.kernel_part_name = mangle_operator(
                 func_name=kernel_param["func_name"],
                 operator_namespace= kernel_param["operator_namespace"],
                 template_args= kernel_param["template_args"]
             )
-            self.kernel_part_name = "_ZN2op15paged_attention6nvidia28flashAttentionDecodeHd128CtaIj13__nv_bfloat16EEvPT0_PKS4_S7_S7_PKT_SA_PKfmfmmllllllll"
         else:
             self.kernel_part_name = mangle_cuda_kernel(
                 func_name= kernel_param["func_name"],

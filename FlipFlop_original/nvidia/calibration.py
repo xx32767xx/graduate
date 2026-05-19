@@ -16,9 +16,6 @@ import torch
 import statistics
 from torch.utils.cpp_extension import load_inline
 
-os.environ['TORCH_CUDA_ARCH_LIST'] = 'ivcore11'
-os.environ['TORCH_NVCC_FLAGS'] = '-x ivcore --cuda-gpu-arch=ivcore11'
-
 # ============ 禁用编译缓存，使用独立临时目录 ============
 import tempfile
 import atexit
@@ -48,8 +45,6 @@ class Calibrator:
 
     def run_extended_calibration(self):
         print(f"[INFO] Running extended calibration for {self.device_name}")
-        #l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
-        #print(l2_size_bytes, l2_latency_ns)
 
         # Existing latency/throughput measurements
         sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
@@ -88,8 +83,6 @@ class Calibrator:
                 "const_sm_power": 0.25,
                 "max_power_total": 200.0,
                 "shape_occupancy_factor": occupancy_shape_param,
-                "l2_size_bytes":l2_size_bytes,
-                "l2_latency_ns":l2_latency_ns,
             }
         }
 
@@ -158,7 +151,7 @@ class Calibrator:
             }
             """
         module = load_inline(name="shape_factor_mod", cpp_sources=cpp_src, cuda_sources=kernel_src,
-                             functions=["launch_shape_test"], extra_cuda_cflags=["-x ivcore", "-O3"])
+                             functions=["launch_shape_test"], extra_cuda_cflags=["-O3"])
 
         # 2. 测量逻辑
         shapes = [(16, 16), (32, 8), (64, 4), (128, 2), (256, 1), (8, 32), (4, 64), (2, 128)]
@@ -241,7 +234,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_empty"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=True,
         )
 
@@ -299,7 +292,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_global_latency"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=True,
         )
 
@@ -369,7 +362,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_partial_lat"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=True,
         )
         N = 128 * 1024
@@ -443,7 +436,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_shared_lat"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=True,
         )
 
@@ -502,7 +495,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_local_lat_test"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=True,
         )
 
@@ -716,7 +709,7 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_sync_bench"],
-            extra_cuda_cflags=["-x ivcore"],
+
             verbose=False,
         )
 
@@ -785,7 +778,6 @@ class Calibrator:
             cpp_sources=cpp_src,
             cuda_sources=kernel_src,
             functions=["launch_l2_latency"],
-            extra_cuda_cflags=["-x ivcore"],
             verbose=False,
         )
 

@@ -1,9 +1,9 @@
 {
   "sm_71": {
     "baseline_kernel_overhead_ns": 4709.230782464147,
-    "Mem_LD_coal_ns": 122.70796775817871,
-    "Mem_LD_uncoal_ns": 122.7044563293457,
-    "Mem_LD_partial_ns": 122.70625305175781,
+    "Mem_LD_coal_ns": 112.85796775817871,
+    "Mem_LD_uncoal_ns": 122.5744563293457,
+    "Mem_LD_partial_ns": 116.74625305175781,
     "Mem_LD_shared_ns": 30.13724250793457,
     "Mem_LD_local_ns": 42.35301055908203,
     "issue_cycles": 4.800279922485352,
