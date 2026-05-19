@@ -10,6 +10,7 @@
     "Departure_del_coal_s": 7.66924798488617e-09,
     "Departure_del_uncoal_s": 1.5338057041168213e-08,
     "effective_mem_bw_gbps": 464.70048467291537,
+    "sync_latency_ns": 351.511545646,
     "shape_occupancy_factor": 0.1
   }
 }
