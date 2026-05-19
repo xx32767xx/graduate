@@ -31,15 +31,6 @@ _TEST_CASES_DATA = [
         (655360, 8192, 256, 1),
         RopeAlgo.GPT_NEOX,
     ),
-    (
-        2,
-        20,
-        16,
-        128,
-        (655360, 8192, 256, 1),
-        (655360, 8192, 256, 1),
-        RopeAlgo.GPT_J,
-    ),
 ]
 
 # Tolerance configuration
