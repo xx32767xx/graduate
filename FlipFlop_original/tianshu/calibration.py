@@ -48,8 +48,8 @@ class Calibrator:
 
     def run_extended_calibration(self):
         print(f"[INFO] Running extended calibration for {self.device_name}")
-        l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
-        print(l2_size_bytes, l2_latency_ns)
+        #l2_size_bytes, l2_latency_ns  = self._measure_l2_latency()
+        #print(l2_size_bytes, l2_latency_ns)
 
         # Existing latency/throughput measurements
         sync_latency_ns = self._repeat_and_average(self._measure_sync_fixed_latency)
@@ -791,12 +791,11 @@ class Calibrator:
 
         # 候选L2容量：从32KB到512KB，覆盖常见GPU的L2范围
         l2_candidate_sizes = [
-            32 * 1024, 64 * 1024, 128 * 1024, 256 * 1024, 512 * 1024,
             1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024,
             16 * 1024 * 1024, 32 * 1024 * 1024, 40 * 1024 * 1024
         ]
 
-        chaseIters = 200000
+        chaseIters = 2000
         stride = 1  # 完全合并模式，保证延迟测量不受合并程度干扰
 
         latencies = []
