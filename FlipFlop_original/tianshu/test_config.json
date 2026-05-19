@@ -47,7 +47,7 @@
     ]
   },
   "paged_attention": {
-      "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/paged_attention/nvidia/paged_attention_nvidia.cu",
+      "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/paged_attention/nvidia/paged_attention_hd64.cu",
       "benchmark_script": "paged_attention.py",
       "configs": [
           {
