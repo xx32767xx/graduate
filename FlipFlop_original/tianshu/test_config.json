@@ -60,7 +60,7 @@
                     "nvidia",
                     "flashAttentionDecodeHd64Warp"
                   ],
-                  "template_args": ["unsigned int", "float"]
+                  "template_args": ["unsigned int", "__half"]
               }
           },
           {
