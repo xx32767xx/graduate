@@ -86,11 +86,6 @@ class DivergenceAnalyzer:
 
         print(f"[D-CFG] Built with {len(self.d_cfg)} nodes, removed back edges")
 
-        # 打印调试信息
-        for block_id, succs in self.d_cfg.items():
-            if succs:
-                # print(f"[D-CFG] Block {block_id} -> {succs}")
-
         return self.d_cfg
 
     def _is_constant(self, operand: str) -> bool:
@@ -125,7 +120,6 @@ class DivergenceAnalyzer:
             # 情况0：tid_get 指令（起点）
             if op == "tid_get":
                 self.affine_map[reg_name] = AffineExpr(a=1, b=0)
-                print(f"[Affine] {reg_name} = tid -> 1*tid + 0")
 
             # 情况1：zext/sext（零扩展/符号扩展）
             elif op in ["zext", "sext"] and len(args) >= 1:
@@ -133,7 +127,6 @@ class DivergenceAnalyzer:
                 if src in self.affine_map:
                     expr = self.affine_map[src]
                     self.affine_map[reg_name] = AffineExpr(expr.a, expr.b)
-                    print(f"[Affine] {reg_name} = {op}({src}) -> {expr}")
 
             # 情况2：trunc（截断）
             elif op == "trunc" and len(args) >= 1:
@@ -141,7 +134,6 @@ class DivergenceAnalyzer:
                 if src in self.affine_map:
                     expr = self.affine_map[src]
                     self.affine_map[reg_name] = AffineExpr(expr.a, expr.b)
-                    print(f"[Affine] {reg_name} = trunc({src}) -> {expr}")
 
             # 情况3：add/sub（加减法）
             elif op in ["add", "sub"] and len(args) >= 2:
@@ -157,7 +149,6 @@ class DivergenceAnalyzer:
                     else:
                         new_expr = AffineExpr(left_expr.a - right_expr.a, left_expr.b - right_expr.b)
                     self.affine_map[reg_name] = new_expr
-                    print(f"[Affine] {reg_name} = {op} {left} {right} -> {new_expr}")
 
                 elif left_expr is not None and self._is_constant(right):
                     const_val = int(right)
@@ -166,7 +157,6 @@ class DivergenceAnalyzer:
                     else:
                         new_expr = AffineExpr(left_expr.a, left_expr.b - const_val)
                     self.affine_map[reg_name] = new_expr
-                    print(f"[Affine] {reg_name} = {op} {left} {right} -> {new_expr}")
 
                 elif right_expr is not None and self._is_constant(left):
                     const_val = int(left)
@@ -175,7 +165,6 @@ class DivergenceAnalyzer:
                     else:
                         new_expr = AffineExpr(-right_expr.a, const_val - right_expr.b)
                     self.affine_map[reg_name] = new_expr
-                    print(f"[Affine] {reg_name} = {op} {left} {right} -> {new_expr}")
 
             # 情况4：mul（乘法，只支持常数乘法）
             elif op == "mul" and len(args) >= 2:
@@ -189,13 +178,11 @@ class DivergenceAnalyzer:
                     const_val = int(right)
                     new_expr = AffineExpr(left_expr.a * const_val, left_expr.b * const_val)
                     self.affine_map[reg_name] = new_expr
-                    print(f"[Affine] {reg_name} = mul {left} {right} -> {new_expr}")
 
                 elif right_expr is not None and self._is_constant(left):
                     const_val = int(left)
                     new_expr = AffineExpr(right_expr.a * const_val, right_expr.b * const_val)
                     self.affine_map[reg_name] = new_expr
-                    print(f"[Affine] {reg_name} = mul {left} {right} -> {new_expr}")
 
             # 情况5：phi（控制流汇聚）
             elif op.startswith("phi") and len(args) >= 2:
@@ -216,7 +203,6 @@ class DivergenceAnalyzer:
                     all_same = all(e.a == first_expr.a and e.b == first_expr.b for e in exprs)
                     if all_same:
                         self.affine_map[reg_name] = AffineExpr(first_expr.a, first_expr.b)
-                        print(f"[Affine] {reg_name} = phi({values}) -> {first_expr}")
 
         print(f"[Affine] Total {len(self.affine_map)} registers can be expressed as linear functions")
 
