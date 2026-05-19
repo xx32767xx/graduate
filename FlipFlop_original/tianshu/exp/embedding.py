@@ -7,7 +7,7 @@ import infinicore
 import torch
 from framework import BaseOperatorTest, TensorSpec, TestCase, GenericTestRunner
 from framework.tensor import TensorInitializer
-from framework.utils.tensor_utils import convert_infinicore_to_torch,infinicore_tensor_from_torch,to_torch_dtype,
+from framework.utils.tensor_utils import convert_infinicore_to_torch,infinicore_tensor_from_torch,to_torch_dtype
 
 
 # ==============================================================================
