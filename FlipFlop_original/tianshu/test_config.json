@@ -28,5 +28,41 @@
             }
         }
     ]
-  }
+  },
+  "causal_softmax": {
+    "source_file": "/root/InfiniGraph/InfiniCore/src/infiniop/ops/causal_softmax/nvidia/causal_softmax.cu",
+    "benchmark_script": "causal_softmax.py",
+    "configs": [
+        {
+            "block_x": 1024, "block_y": 1, "grid_x": 3, "grid_y": 3,
+            "kernel_param": {
+                "part_name": "qwe"
+            }
+        },
+        {
+            "block_x": 1024, "block_y": 1, "grid_x": 512, "grid_y": 32,
+            "kernel_param": {
+                "part_name": "qwe"
+            }
+        },
+        {
+            "block_x": 1024, "block_y": 1, "grid_x": 5, "grid_y": 160,
+            "kernel_param": {
+                "part_name": "qwe"
+            }
+        },
+        {
+            "block_x": 1024, "block_y": 1, "grid_x": 512, "grid_y": 640,
+            "kernel_param": {
+                "part_name": "qwe"
+            }
+        },
+        {
+            "block_x": 1024, "block_y": 1, "grid_x": 15, "grid_y": 420,
+            "kernel_param": {
+                "part_name": "qwe"
+            }
+        }
+    ]
+}
 }
