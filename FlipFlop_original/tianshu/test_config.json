@@ -6,13 +6,25 @@
         {
             "block_x": 1024, "block_y": 1, "grid_x": 15, "grid_y": 1,
             "kernel_param": {
-                "part_name": ""
+              "func_name": "add_rmsnormKernel",
+              "template_args": [
+              [4096,"unsigned int"],
+              "float",
+              "half",
+              "float"
+              ]
             }
         },
         {
             "block_x": 1024, "block_y": 1, "grid_x": 16, "grid_y": 1,
             "kernel_param": {
-                "part_name": ""
+              "func_name": "add_rmsnormKernel",
+              "template_args": [
+              [4096,"unsigned int"],
+              "float",
+              "half",
+              "float"
+              ]
             }
         }
     ]
