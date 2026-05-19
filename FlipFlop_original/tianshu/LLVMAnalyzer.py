@@ -111,6 +111,8 @@ class LLVMAnalyzer:
         total_insts = (mem_coal + mem_un + mem_part +
                        inst_counts['loc'] + inst_counts['shr'] + inst_counts['sy'] + total_compute)
 
+        work_set =  self._estimate_working_set()
+        print(work_set)
 
         from gpu_common import KernelAnalysis
         return KernelAnalysis(
@@ -815,6 +817,114 @@ class LLVMAnalyzer:
             final_weights[b_idx] = base * penalty
 
         self.inst_weights = final_weights
+
+    def _estimate_working_set(self) -> dict:
+        """
+        基于步长分级的线程束工作集估算。
+        利用3.3.2节的合并程度判断结果，区分连续与非连续访存，
+        返回单线程工作集和线程束工作集（字节）。
+        """
+        CACHELINE = 128
+        thread_bytes = 0
+        warp_bytes = 0
+
+        for block in self.basic_blocks:
+            loop_weight = 1  # 复用3.2.2节
+
+            for inst in block:
+                if not self._is_global_mem_inst(inst):  # 复用3.3.1节
+                    continue
+
+                width = self._get_type_width(inst)  # float=4, double=8等
+                is_coalesced = True  # 复用3.3.2节
+
+                # 单线程访存量（连续与非连续相同）
+                thread_bytes += width * loop_weight
+
+                # 线程束访存量（按合并程度分类处理）
+                if is_coalesced:
+                    # 连续访问：按缓存行粒度向上取整
+                    warp_range = 32 * width
+                    warp_cachelines = (warp_range + CACHELINE - 1) // CACHELINE
+                    warp_bytes += warp_cachelines * CACHELINE * loop_weight
+                else:
+                    # 非连续访问：保守估计每个线程独立访存
+                    warp_bytes += width * 32 * loop_weight
+
+        return warp_bytes
+
+    def _is_global_mem_inst(self, inst: str) -> bool:
+        """
+        判断一条LLVM IR指令是否为全局内存访存指令。
+        全局内存对应地址空间1（addrspace(1)）。
+        """
+        clean_inst = inst.strip()
+
+        # 过滤注释和空行
+        if not clean_inst or clean_inst.startswith(';'):
+            return False
+
+        # 检查是否为 load 或 store 指令
+        is_load = re.search(r'\bload\b', clean_inst)
+        is_store = re.search(r'\bstore\b', clean_inst)
+
+        if not (is_load or is_store):
+            return False
+
+        # 检查地址空间是否为1（全局内存）
+        # 典型格式: load float, float addrspace(1)* %ptr
+        #           store float %val, float addrspace(1)* %ptr
+        if re.search(r'addrspace\(1\)', clean_inst):
+            return True
+
+        # 对于没有显式addrspace的load/store（可能默认全局内存）
+        # 检查是否包含非0/3/5的地址空间
+        if re.search(r'addrspace\(\d+\)', clean_inst):
+            return False  # 有其他地址空间标记但不是1
+
+        # 无地址空间标记的load/store，在GPU上默认视为全局内存
+        return True
+
+    def _get_type_width(self, inst: str) -> int:
+        """
+        从LLVM IR指令中提取访存操作的数据类型宽度（字节）。
+        通过匹配 load/store 指令的类型声明获取。
+        """
+        # 类型到字节数的映射（与共享内存分析共用）
+        type_size_map = {
+            "float": 4,
+            "double": 8,
+            "i64": 8,
+            "i32": 4,
+            "i16": 2,
+            "i8": 1,
+            "half": 2,
+            "bfloat": 2,
+            "__nv_bfloat16": 2,
+            "v2bf16": 4,
+            "v2f16": 4,
+            "v4f16": 8,
+            "v2f32": 8,
+            "v4f32": 16,
+            "ptr": 8
+        }
+
+        clean_inst = inst.strip()
+
+        # 匹配 load 指令: load <type>, <type>* ...
+        load_match = re.search(r'load\s+(\w+)\s*,', clean_inst)
+        if load_match:
+            type_name = load_match.group(1)
+            return type_size_map.get(type_name, 4)  # 默认4字节
+
+        # 匹配 store 指令: store <type> ...
+        store_match = re.search(r'store\s+(\w+)\s+', clean_inst)
+        if store_match:
+            type_name = store_match.group(1)
+            return type_size_map.get(type_name, 4)
+
+        # 默认4字节
+        return 4
 
 if __name__ == "__main__":
     block_x = 512

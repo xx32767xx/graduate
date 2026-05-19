@@ -77,7 +77,7 @@
               }
           },
           {
-              "block_x": 32, "block_y": 1, "grid_x": 40,  "grid_y": 6,
+              "block_x": 64, "block_y": 1, "grid_x": 40,  "grid_y": 6,
               "kernel_param": {
                   "func_name": "paged_attention",
                   "operator_namespace":[

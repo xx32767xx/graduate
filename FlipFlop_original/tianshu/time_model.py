@@ -250,6 +250,7 @@ class HongKimExecutionTimeModel:
         share_mem_lim = max_shm_sm//shared_need if shared_need>0 else tlim
 
         hw_blocklim   = arch_attrs.get('MAX_BLOCKS_PER_MULTIPROCESSOR',16)
+        print(f"!!!{(tlim, rlim, share_mem_lim, hw_blocklim)}")
         blocks_possible = min(tlim, rlim, share_mem_lim, hw_blocklim)
         return max(1, blocks_possible)
 
